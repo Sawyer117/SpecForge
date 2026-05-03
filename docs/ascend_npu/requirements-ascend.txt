@@ -54,6 +54,25 @@ ninja
 packaging
 setuptools<81  # torch_npu.dynamo.torchair still imports pkg_resources, removed in setuptools 81+
 
+# ------ CANN ABI compatibility ------
+# CANN 8.x ships Python helper packages (te, auto-tune, opc-tool,
+# asc-op-compile-base, schedule-search) that don't declare their PyPI deps
+# correctly. Without these you'll see noisy "X requires Y" warnings and
+# parts of the CANN toolkit fail at import.
+decorator
+cloudpickle
+ml-dtypes
+tornado
+scipy
+cffi
+pybind11
+sympy
+absl-py
+# protobuf 4.25.x works for both wandb (>4.21) and CANN 8.5+. If your CANN
+# strictly requires protobuf 3.20.x (older toolkits), pin "protobuf==3.20.3"
+# and switch tracking from --report-to wandb to --report-to tensorboard.
+protobuf>=4.25,<5
+
 # ------ Experiment tracking (pick one or both) ------
 wandb==0.26.1
 tensorboard==2.20.0
