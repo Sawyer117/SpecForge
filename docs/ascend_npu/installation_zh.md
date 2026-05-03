@@ -68,43 +68,35 @@ git clone -b docs/ascend-npu https://github.com/Sawyer117/SpecForge.git
 cd SpecForge
 ```
 
-### 步骤 3 —— 从华为云镜像装 torch / torchvision / torch_npu
+### 步骤 3 —— 一次装齐所有 Python 依赖（含 torch / torch_npu）
 
 ```bash
-pip install torch==2.9.0 torchvision==0.24.0 \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
-
-pip install torch_npu==2.9.0 \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
+pip install -r docs/ascend_npu/requirements-ascend.txt
 ```
+
+`requirements-ascend.txt` 头部已经声明：
+
+```
+--index-url https://mirrors.huaweicloud.com/repository/pypi/simple/
+--trusted-host mirrors.huaweicloud.com
+```
+
+所以 torch、torchvision、torch_npu 以及其他所有包**都从华为云镜像拉**——
+镜像上既有 PyPI 完整副本，也有 Ascend 的 `torch_npu` wheel，**一条命令搞定**。
 
 > 如果镜像上没有 `torch_npu==2.9.0`，看
 > [常见问题 #1](#1-torch_npu290-镜像上找不到)。
 
-### 步骤 4 —— 装其余钉死版本的依赖
-
-```bash
-# 把 torch / torchvision 行从 requirements 里去掉（步骤 3 已经装过）
-sed -i '/^torch==/d; /^torchvision==/d' docs/ascend_npu/requirements-ascend.txt
-
-pip install -r docs/ascend_npu/requirements-ascend.txt
-```
-
-> **不要 revert** 这个 sed。装完之后这个文件改动只在本地——`git status`
-> 看到它被改了不要紧，将来想恢复用 `git checkout -- docs/ascend_npu/requirements-ascend.txt`。
-
-### 步骤 5 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
+### 步骤 4 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
 
 ```bash
 pip install -e . --no-deps
 ```
 
 `--no-deps` **必须有**。否则 pip 会按 SpecForge 自己的 `pyproject.toml` 去满足
-`torch==2.9.1`、`sglang==0.5.9` 这两条，跟你刚刚步骤 3–4 装的会冲突。
+`torch==2.9.1`、`sglang==0.5.9` 这两条，跟你刚刚步骤 3 装的会冲突。
 
-### 步骤 6 —— 验证
+### 步骤 5 —— 验证
 
 ```bash
 python - <<'PY'

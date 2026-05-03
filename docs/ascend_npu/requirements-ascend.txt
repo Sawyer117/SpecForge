@@ -6,26 +6,31 @@
 #   - CANN            8.5+
 #   - Hardware        Atlas A2 / 910b / A3
 #
+# Usage:
+#   pip install -r requirements-ascend.txt
+#
 # Notes:
-#   - torch / torch_npu must come from Ascend's wheel index (huaweicloud mirror or
-#     equivalent). Plain PyPI does not host torch_npu. Match torch and torch_npu
-#     versions exactly. As of 2026-05 the latest NPU-supported pair is 2.9.0;
-#     SpecForge upstream's 2.9.1 is NOT yet supported on torch_npu.
+#   - The --index-url below forces all packages (including torch / torchvision
+#     / torch_npu) to come from the Huawei Cloud PyPI mirror. The mirror is a
+#     full PyPI replica AND hosts the Ascend torch_npu wheels.
+#   - As of 2026-05 the latest NPU-supported torch pair is 2.9.0; SpecForge
+#     upstream's 2.9.1 is NOT yet supported by torch_npu.
 #   - sglang is NOT included. This file targets the HF backend
-#     (--target-model-backend hf). Add sglang separately if you need sglang
-#     backend.
-#   - flash-attn is NOT included. It has no NPU build; DFlash on NPU runs with
-#     --attention-backend sdpa.
+#     (--target-model-backend hf). Add sglang separately if you need it.
+#   - flash-attn is NOT included. It has no NPU build; DFlash on NPU runs
+#     with --attention-backend sdpa.
 #   - yunchang is included as a dormant dependency. SpecForge imports it at
-#     module load time, but DFlash with default args (sp_*=1) does not exercise
-#     its sequence-parallel kernels. yunchang 0.6.4 is fully NPU-safe at import.
+#     module load time, but DFlash with default args (sp_*=1) does not
+#     exercise its sequence-parallel kernels.
+
+# ------ Index: force everything through the Huawei Cloud mirror ------
+--index-url https://mirrors.huaweicloud.com/repository/pypi/simple/
+--trusted-host mirrors.huaweicloud.com
 
 # ------ Core deep-learning runtime (NPU-friendly; do not bump without verifying torch_npu pair) ------
 torch==2.9.0
 torchvision==0.24.0
-# Install torch_npu separately from Ascend index, e.g.:
-#   pip install torch_npu==2.9.0 -i https://mirrors.huaweicloud.com/repository/pypi/simple/
-# torch_npu==2.9.0  # uncomment only if you have it on a discoverable index
+torch_npu==2.9.0
 
 # ------ Sequence parallel (dormant on DFlash; native NPU support since 0.6.4) ------
 yunchang==0.6.4

@@ -72,35 +72,27 @@ git clone -b docs/ascend-npu https://github.com/Sawyer117/SpecForge.git
 cd SpecForge
 ```
 
-### Step 3 — Install torch / torchvision / torch_npu from the Huawei Cloud mirror
+### Step 3 — Install all Python deps in one go (incl. torch / torch_npu)
 
 ```bash
-pip install torch==2.9.0 torchvision==0.24.0 \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
-
-pip install torch_npu==2.9.0 \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
+pip install -r docs/ascend_npu/requirements-ascend.txt
 ```
+
+The header of `requirements-ascend.txt` declares:
+
+```
+--index-url https://mirrors.huaweicloud.com/repository/pypi/simple/
+--trusted-host mirrors.huaweicloud.com
+```
+
+so **every** package — torch, torchvision, torch_npu, and the rest — is pulled
+from the Huawei Cloud mirror. The mirror is a full PyPI replica AND hosts the
+Ascend `torch_npu` wheels, so a single `pip install -r` does the whole job.
 
 > If `torch_npu==2.9.0` is not on the mirror, see
 > [Troubleshooting #1](#1-torch_npu290-not-found-on-the-mirror).
 
-### Step 4 — Install the rest of the pinned dependencies
-
-```bash
-# Strip the torch / torchvision lines (already installed in step 3)
-sed -i '/^torch==/d; /^torchvision==/d' docs/ascend_npu/requirements-ascend.txt
-
-pip install -r docs/ascend_npu/requirements-ascend.txt
-```
-
-> **Do not** undo the `sed`. After install, the file edit is local-only —
-> when you `git status` you will see a modified file, which you can safely
-> `git checkout -- docs/ascend_npu/requirements-ascend.txt` later.
-
-### Step 5 — Editable-install SpecForge **without** re-resolving deps
+### Step 4 — Editable-install SpecForge **without** re-resolving deps
 
 ```bash
 pip install -e . --no-deps
@@ -108,9 +100,9 @@ pip install -e . --no-deps
 
 `--no-deps` is **required**. Without it, pip would try to satisfy SpecForge's
 own `pyproject.toml` pins (`torch==2.9.1`, `sglang==0.5.9`), both of which
-conflict with what you intentionally installed in steps 3–4.
+conflict with what you intentionally installed in step 3.
 
-### Step 6 — Verify
+### Step 5 — Verify
 
 ```bash
 python - <<'PY'
