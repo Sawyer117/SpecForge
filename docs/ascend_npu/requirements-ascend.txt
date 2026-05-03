@@ -15,8 +15,13 @@
 #     full PyPI replica AND hosts the Ascend torch_npu wheels.
 #   - As of 2026-05 the latest NPU-supported torch pair is 2.9.0; SpecForge
 #     upstream's 2.9.1 is NOT yet supported by torch_npu.
-#   - sglang is NOT included. This file targets the HF backend
-#     (--target-model-backend hf). Add sglang separately if you need it.
+#   - sglang is NOT in this file. SpecForge's eagle3_target_model.py has a
+#     top-level `import sglang.srt.managers.mm_utils`, so sglang must be
+#     importable for any `import specforge` to work — even with HF backend
+#     at runtime. Install it via Step 4 of installation.md (clone upstream
+#     sgl-project/sglang, checkout commit 4926ca275, swap pyproject_npu.toml
+#     in, pip install -e). Don't put sglang here because the install needs
+#     a from-source build with a pyproject swap, not a wheel-pull.
 #   - flash-attn is NOT included. It has no NPU build; DFlash on NPU runs
 #     with --attention-backend sdpa.
 #   - yunchang is included as a dormant dependency. SpecForge imports it at

@@ -87,27 +87,89 @@ pip install -r docs/ascend_npu/requirements-ascend.txt
 > 如果镜像上没有 `torch_npu==2.9.0`，看
 > [常见问题 #1](#1-torch_npu290-镜像上找不到)。
 
-### 步骤 4 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
+### 步骤 4 —— 装 sglang（即使你只用 HF backend 也必须装）
+
+SpecForge `specforge/modeling/target/eagle3_target_model.py:5` 有一句：
+
+```python
+import sglang.srt.managers.mm_utils as mm_utils
+```
+
+是顶层硬 import，`specforge/modeling/target/__init__.py` 又会顶层 import
+`eagle3_target_model`。所以**只要你 `import specforge`，sglang 就必须能 import**
+——不管你跑训练时传的是 `--target-model-backend hf` 还是 `sglang`。
+
+我们不装 PyPI 上的 `sglang==0.5.9`（拉太多 GPU-tagged 依赖），也不 copy 同事 fork
+里的 sglang（继承不该继承的 patch）。**正解是从 upstream `sgl-project/sglang`
+取一个已验证 commit**——同事 vendored 那份的版本字符串是
+`0.5.6.post3.dev2770+g4926ca275`，里面 `g4926ca275` 就是上游 commit 短哈希。
+
+```bash
+# 1. 离开 SpecForge 目录，clone upstream sglang
+cd ..
+git clone https://github.com/sgl-project/sglang.git
+cd sglang
+
+# 2. checkout 到验证过的 commit
+git checkout 4926ca275
+git log --oneline 4926ca275 -1     # 确认 commit 存在
+
+# 3. 看一下 python/ 下有几份 pyproject 备选
+ls python/pyproject*.toml
+# 期望: pyproject.toml  pyproject_cpu.toml  pyproject_npu.toml  pyproject_xpu.toml
+# 如果只看到 pyproject.toml 一份，跳到 [常见问题 #6](#6-sglang-装不上)。
+
+# 4. 用 NPU 版的 pyproject（先备份默认那份方便回退）
+cp python/pyproject.toml python/pyproject.toml.bak
+cp python/pyproject_npu.toml python/pyproject.toml
+
+# 5. editable 安装。[srt_npu] 这个 extra 是空的（pyproject_npu.toml 里 srt_npu = []），
+#   写不写都一样，遵循 upstream 习惯写上：
+pip install -e "python[srt_npu]" \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# 6. 验证 sglang import 通了
+python -c "
+import sglang
+print('sglang version:', sglang.__version__)
+import sglang.srt.managers.mm_utils
+print('mm_utils import OK')
+"
+# 期望版本类似: 0.5.6.dev<N>+g4926ca275  （没有 'post3' 后缀；那是同事的 build metadata）
+
+# 7. 回 SpecForge 目录，准备步骤 5
+cd ../SpecForge
+```
+
+> 装这一步**第一次不要加 `--no-deps`**——让 pip 把 sglang 的依赖装齐，看到底
+> 哪些能装上。如果某条依赖（典型 `flashinfer-python` / `sgl-kernel` /
+> `vllm-flash-attn`）卡死编译失败，看 [常见问题 #6](#6-sglang-装不上)。
+
+### 步骤 5 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
 
 ```bash
 pip install -e . --no-deps
 ```
 
 `--no-deps` **必须有**。否则 pip 会按 SpecForge 自己的 `pyproject.toml` 去满足
-`torch==2.9.1`、`sglang==0.5.9` 这两条，跟你刚刚步骤 3 装的会冲突。
+`torch==2.9.1`、`sglang==0.5.9` 这两条——前者跟你刚装的 2.9.0 冲突、后者跟你
+刚从源码装的 commit 版冲突，两条都会被 pip 强行覆盖装。
 
-### 步骤 5 —— 验证
+### 步骤 6 —— 验证
 
 ```bash
 python - <<'PY'
 import torch, torch_npu
 from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN, HAS_NPU
 import transformers
+import sglang
 import specforge
 
 print("torch                    :", torch.__version__)
 print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
+print("sglang                   :", sglang.__version__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
@@ -122,6 +184,7 @@ PY
 torch                    : 2.9.0
 torch_npu                : 2.9.0          (或 2.9.0.postN，看镜像实际有什么)
 transformers             : 4.57.1
+sglang                   : 0.5.6.dev<N>+g4926ca275
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -129,7 +192,7 @@ torch.npu.device_count() : 8              (你机器实际 NPU 数)
 specforge import OK
 ```
 
-六行都对的话，环境就绪，可以开始训练。
+各行都对的话，环境就绪，可以开始训练。
 
 ---
 
@@ -187,6 +250,73 @@ pip install "torch>=2.3.0"   # 这是 yunchang 唯一真正的硬依赖
 把完整 traceback 抓出来。常见原因是 yunchang 的 `__init__.py` 跑
 `from .ring import *`，传递触发了某个子模块需要一个本机不存在的包。报错原文给我
 ——yunchang 0.6.4 理论上 NPU 干净，这一步出问题非常值得追。
+
+### 6. sglang 装不上
+
+#### 6a. `git checkout 4926ca275` 报 `unknown revision`
+
+upstream 的浅 clone 默认不带全历史。换深 clone：
+
+```bash
+git clone --no-single-branch https://github.com/sgl-project/sglang.git
+# 或者已经 clone 完之后补：
+git fetch --unshallow
+```
+
+#### 6b. `ls python/pyproject*.toml` 只看到 `pyproject.toml` 一份
+
+说明这个 commit 太老，多平台 pyproject 还没引入。两条退路：
+
+退路 1，找最早引入 `pyproject_npu.toml` 的 upstream commit：
+
+```bash
+git log --diff-filter=A --oneline -- python/pyproject_npu.toml
+# 取最早那个 commit hash，重做 git checkout
+```
+
+退路 2，直接装 PyPI 上 SpecForge upstream 钉的版本：
+
+```bash
+pip install sglang==0.5.9 --no-deps \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# 然后根据 import 报错逐个补缺包
+python -c "import sglang.srt.managers.mm_utils"
+```
+
+#### 6c. `pip install -e python` 卡在某条 GPU-only 依赖编译失败
+
+典型出问题的：`flashinfer-python`、`sgl-kernel`、`vllm-flash-attn`。这些在 aarch64
+没有 wheel，会试图编译 CUDA C++，缺 nvcc 就死。**用 `--no-deps` 跳过依赖解析**：
+
+```bash
+pip install -e "python[srt_npu]" --no-deps \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# 然后用 import 验证哪些 dep 是真的 import-time 必需的，逐个补：
+python -c "import sglang.srt.managers.mm_utils"
+# 若报 ModuleNotFoundError: 'X'，pip install X 即可
+```
+
+最常见会缺：`compressed-tensors` / `xgrammar` / `uvloop` / `uvicorn` / `fastapi`
+/ `msgspec` / `partial_json_parser` / `outlines` / `interegular` / `llguidance`
+/ `anthropic` / `prometheus-client` / `pyzmq` / `setproctitle` / `tiktoken` /
+`timm` / `smg-grpc-proto` / `hf_transfer` / `av` / `decord2` / `soundfile` /
+`grpcio`。这些大多有 aarch64 wheel，能装。`flashinfer-python` /
+`sgl-kernel` / `vllm` 这种 GPU-only 的——**别装**，它们在 sglang import 阶段
+不会触达。
+
+#### 6d. `import sglang` 时报 `cannot find libcudart.so` 或 CUDA 类错误
+
+说明这个 commit 的 sglang 在 import 阶段就 eager-load 了 CUDA 库。退到稍老的
+upstream commit 或用 PyPI 老版本，比如 `sglang==0.5.4`（SpecForge
+`requirements-rocm.txt` 钉的版本）：
+
+```bash
+pip install sglang==0.5.4 --no-deps -i ...
+```
 
 ---
 

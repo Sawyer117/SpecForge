@@ -188,8 +188,13 @@ pip install -e . --no-deps
 ```
 
 第 5 步特意加 `--no-deps`：SpecForge 的 `pyproject.toml` 里钉了
-`torch==2.9.1` 和 `sglang==0.5.9`，这两条我们都在主动绕开。第 4 步已经把
-SpecForge 运行时真正需要的依赖装齐（除了 sglang，HF backend 不需要）。
+`torch==2.9.1` 和 `sglang==0.5.9`，前者跟 NPU 选用的 2.9.0 冲突，后者跟我们
+从 upstream 源码装的 commit 版冲突——不绕开 pip 会强行覆盖。
+
+> **注**：本文档**早期版本**说过"sglang 不需要装"。这是错的——`specforge/modeling/target/eagle3_target_model.py:5`
+> 顶层硬 import sglang，即便只用 HF backend 也要让它能 import。具体安装步骤
+> 见 `installation_zh.md` 的步骤 4（clone upstream sgl-project/sglang、checkout
+> commit `4926ca275`、把 `pyproject_npu.toml` swap 进来、`pip install -e`）。
 
 ### 5.3 验证
 

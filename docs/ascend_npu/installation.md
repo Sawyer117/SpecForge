@@ -92,7 +92,72 @@ Ascend `torch_npu` wheels, so a single `pip install -r` does the whole job.
 > If `torch_npu==2.9.0` is not on the mirror, see
 > [Troubleshooting #1](#1-torch_npu290-not-found-on-the-mirror).
 
-### Step 4 — Editable-install SpecForge **without** re-resolving deps
+### Step 4 — Install sglang (required even for HF backend)
+
+`specforge/modeling/target/eagle3_target_model.py:5` contains an unconditional
+top-level import:
+
+```python
+import sglang.srt.managers.mm_utils as mm_utils
+```
+
+and `specforge/modeling/target/__init__.py` imports `eagle3_target_model` at
+top level. Hence **any `import specforge` requires sglang to be importable**,
+regardless of whether you use `--target-model-backend hf` or `sglang` at
+runtime.
+
+We do **not** install PyPI's `sglang==0.5.9` (pulls too many GPU-tagged deps),
+and we do **not** copy from any internal SpecForge fork (avoids inheriting
+their patches). The clean approach is to build sglang from a known-good
+**upstream `sgl-project/sglang`** commit. The version string
+`0.5.6.post3.dev2770+g4926ca275` from existing NPU deployments tells us the
+upstream commit is `4926ca275`.
+
+```bash
+# 1. Leave the SpecForge dir, clone upstream sglang
+cd ..
+git clone https://github.com/sgl-project/sglang.git
+cd sglang
+
+# 2. Check out the validated commit
+git checkout 4926ca275
+git log --oneline 4926ca275 -1     # confirm the commit exists
+
+# 3. List the pyproject variants
+ls python/pyproject*.toml
+# Expected: pyproject.toml  pyproject_cpu.toml  pyproject_npu.toml  pyproject_xpu.toml
+# If only pyproject.toml is present, see Troubleshooting #6.
+
+# 4. Use the NPU pyproject variant (back up the default first for safety)
+cp python/pyproject.toml python/pyproject.toml.bak
+cp python/pyproject_npu.toml python/pyproject.toml
+
+# 5. Editable install. The [srt_npu] extra is empty in pyproject_npu.toml
+#    (srt_npu = []), so writing it is just upstream convention:
+pip install -e "python[srt_npu]" \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# 6. Verify sglang imports work
+python -c "
+import sglang
+print('sglang version:', sglang.__version__)
+import sglang.srt.managers.mm_utils
+print('mm_utils import OK')
+"
+# Expected version: 0.5.6.dev<N>+g4926ca275 (no 'post3' suffix — that's
+# upstream-foreign build metadata)
+
+# 7. Back to SpecForge for step 5
+cd ../SpecForge
+```
+
+> Do **not** add `--no-deps` on the first attempt — let pip resolve deps and
+> see which ones install cleanly. If a specific GPU-only dep fails (typically
+> `flashinfer-python`, `sgl-kernel`, `vllm-flash-attn`), see
+> [Troubleshooting #6](#6-sglang-install-fails).
+
+### Step 5 — Editable-install SpecForge **without** re-resolving deps
 
 ```bash
 pip install -e . --no-deps
@@ -100,20 +165,23 @@ pip install -e . --no-deps
 
 `--no-deps` is **required**. Without it, pip would try to satisfy SpecForge's
 own `pyproject.toml` pins (`torch==2.9.1`, `sglang==0.5.9`), both of which
-conflict with what you intentionally installed in step 3.
+conflict with what you installed in steps 3 and 4 — and pip would happily
+overwrite them.
 
-### Step 5 — Verify
+### Step 6 — Verify
 
 ```bash
 python - <<'PY'
 import torch, torch_npu
 from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN, HAS_NPU
 import transformers
+import sglang
 import specforge
 
 print("torch                    :", torch.__version__)
 print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
+print("sglang                   :", sglang.__version__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
@@ -128,6 +196,7 @@ PY
 torch                    : 2.9.0
 torch_npu                : 2.9.0          (or 2.9.0.postN, exact value depends on the mirror)
 transformers             : 4.57.1
+sglang                   : 0.5.6.dev<N>+g4926ca275
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -195,6 +264,76 @@ Capture the full traceback. Common cause is yunchang's `__init__.py` running
 `from .ring import *`, which transitively imports a submodule that needs
 something missing on the system. Report the traceback — yunchang 0.6.4 is
 expected to be NPU-clean, so any failure here is genuinely interesting.
+
+### 6. sglang install fails
+
+#### 6a. `git checkout 4926ca275` reports `unknown revision`
+
+A shallow clone won't carry full history. Either re-clone deep, or fetch the
+rest:
+
+```bash
+git clone --no-single-branch https://github.com/sgl-project/sglang.git
+# Or, if already cloned:
+git fetch --unshallow
+```
+
+#### 6b. `ls python/pyproject*.toml` only shows `pyproject.toml`
+
+That commit predates the multi-platform pyproject split. Two fallbacks:
+
+Fallback 1, find the earliest upstream commit that introduced
+`pyproject_npu.toml`:
+
+```bash
+git log --diff-filter=A --oneline -- python/pyproject_npu.toml
+# Take the earliest commit hash and re-do git checkout
+```
+
+Fallback 2, install the version SpecForge upstream pins from PyPI:
+
+```bash
+pip install sglang==0.5.9 --no-deps \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# Then resolve missing imports one-by-one
+python -c "import sglang.srt.managers.mm_utils"
+```
+
+#### 6c. `pip install -e python` stalls on a GPU-only dep building from source
+
+Typical offenders: `flashinfer-python`, `sgl-kernel`, `vllm-flash-attn`. None
+have aarch64 wheels and they try to compile CUDA C++ from source. **Skip dep
+resolution with `--no-deps`**:
+
+```bash
+pip install -e "python[srt_npu]" --no-deps \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+# Then run import to discover which deps are actually needed at import time:
+python -c "import sglang.srt.managers.mm_utils"
+# If you get ModuleNotFoundError: 'X', pip install X
+```
+
+Most-likely missing: `compressed-tensors`, `xgrammar`, `uvloop`, `uvicorn`,
+`fastapi`, `msgspec`, `partial_json_parser`, `outlines`, `interegular`,
+`llguidance`, `anthropic`, `prometheus-client`, `pyzmq`, `setproctitle`,
+`tiktoken`, `timm`, `smg-grpc-proto`, `hf_transfer`, `av`, `decord2`,
+`soundfile`, `grpcio`. Most of these have aarch64 wheels.
+`flashinfer-python` / `sgl-kernel` / `vllm` are GPU-only — **do not install
+them**; they are not reached during sglang's import phase.
+
+#### 6d. `import sglang` fails with `cannot find libcudart.so` or other CUDA errors
+
+The commit eager-loads CUDA at import time. Fall back to an older upstream
+commit, or to PyPI's `sglang==0.5.4` (the version pinned in SpecForge's
+`requirements-rocm.txt`):
+
+```bash
+pip install sglang==0.5.4 --no-deps -i ...
+```
 
 ---
 

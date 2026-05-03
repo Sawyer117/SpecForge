@@ -199,9 +199,18 @@ pip install -e . --no-deps
 ```
 
 `--no-deps` in step 5 is deliberate: SpecForge's `pyproject.toml` pins
-`torch==2.9.1` and `sglang==0.5.9`, both of which we are intentionally
-overriding. Step 4 has already installed everything SpecForge actually
-needs at runtime (minus sglang, which is HF-backend irrelevant).
+`torch==2.9.1` and `sglang==0.5.9`. The torch pin conflicts with the
+NPU-supported 2.9.0; the sglang pin conflicts with the from-source upstream
+commit we install. Without `--no-deps`, pip would happily overwrite both.
+
+> **Correction note**: an earlier version of this document said "sglang is
+> HF-backend irrelevant and need not be installed." That was wrong —
+> `specforge/modeling/target/eagle3_target_model.py:5` is an unconditional
+> top-level `import sglang.srt.managers.mm_utils`, which gets triggered by
+> any `import specforge`, regardless of the runtime backend choice. The
+> correct install path is in `installation.md` Step 4 (clone upstream
+> sgl-project/sglang at commit `4926ca275`, swap in `pyproject_npu.toml`,
+> `pip install -e`).
 
 ### 5.3 Verification
 
