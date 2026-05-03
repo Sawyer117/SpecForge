@@ -1,0 +1,60 @@
+# Reproducible Ascend NPU install for SpecForge DFlash (HF backend only).
+#
+# Tested target:
+#   - SpecForge       @ d5fb617f735db85a680876327f8173de0cb57c15  (upstream main, 2026-05)
+#   - yunchang        @ 0.6.4 (PyPI; native NPU ring/hybrid CP since PR #169)
+#   - CANN            8.5+
+#   - Hardware        Atlas A2 / 910b / A3
+#
+# Notes:
+#   - torch / torch_npu must come from Ascend's wheel index (huaweicloud mirror or
+#     equivalent). Plain PyPI does not host torch_npu. Match torch and torch_npu
+#     versions exactly. As of 2026-05 the latest NPU-supported pair is 2.9.0;
+#     SpecForge upstream's 2.9.1 is NOT yet supported on torch_npu.
+#   - sglang is NOT included. This file targets the HF backend
+#     (--target-model-backend hf). Add sglang separately if you need sglang
+#     backend.
+#   - flash-attn is NOT included. It has no NPU build; DFlash on NPU runs with
+#     --attention-backend sdpa.
+#   - yunchang is included as a dormant dependency. SpecForge imports it at
+#     module load time, but DFlash with default args (sp_*=1) does not exercise
+#     its sequence-parallel kernels. yunchang 0.6.4 is fully NPU-safe at import.
+
+# ------ Core deep-learning runtime (NPU-friendly; do not bump without verifying torch_npu pair) ------
+torch==2.9.0
+torchvision==0.24.0
+# Install torch_npu separately from Ascend index, e.g.:
+#   pip install torch_npu==2.9.0 -i https://mirrors.huaweicloud.com/repository/pypi/simple/
+# torch_npu==2.9.0  # uncomment only if you have it on a discoverable index
+
+# ------ Sequence parallel (dormant on DFlash; native NPU support since 0.6.4) ------
+yunchang==0.6.4
+
+# ------ HF stack (pinned to match SpecForge upstream + yunchang's transformers pin) ------
+transformers==4.57.1
+qwen-vl-utils==0.0.11
+
+# ------ Data / training ------
+datasets==4.8.5
+accelerate==1.13.0
+safetensors==0.7.0
+einops==0.8.2
+
+# ------ Misc utilities ------
+numpy<2.0
+pydantic==2.13.3
+psutil
+tqdm
+ninja
+packaging
+setuptools<81  # torch_npu.dynamo.torchair still imports pkg_resources, removed in setuptools 81+
+
+# ------ Experiment tracking (pick one or both) ------
+wandb==0.26.1
+tensorboard==2.20.0
+
+# ------ Optional, used by some target-model configs (e.g. gpt-oss) ------
+openai-harmony==0.0.8
+
+# ------ Pre-commit (optional, only if you intend to develop) ------
+# pre-commit
