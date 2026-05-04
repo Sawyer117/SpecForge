@@ -90,23 +90,29 @@ def main():
         print(f"    {fmt(d):>10}  {k}")
 
     # --- Forward on identical synthetic input ---
+    # DFlash forward shapes (from core/dflash.py OnlineDFlashModel):
+    #   target_hidden    : [bsz, ctx_len, hidden * num_target_layers]
+    #   noise_embedding  : [bsz, q_len, hidden]
+    #   position_ids     : [bsz, ctx_len + q_len]   <-- positions for BOTH ctx and query
+    # Inside Qwen3DFlashAttention, k = cat([k_ctx, k_noise]) so its length is
+    # ctx_len+q_len; cos/sin is generated from position_ids and must match.
     bsz = args.batch_size
-    seq_len = args.seq_len
     block_size = cfg_a.block_size
-    if seq_len % block_size != 0:
-        seq_len = (seq_len // block_size + 1) * block_size
-        print(f"\n  (rounded seq_len up to multiple of block_size={block_size}: {seq_len})")
+    ctx_len = args.seq_len   # context length (target hidden states)
+    q_len = block_size       # one anchor block worth of query positions
     hidden = cfg_a.hidden_size
     num_target_layers = len(model_a.target_layer_ids)
 
     print(f"\n=== Forward diff (synthetic input) ===")
-    print(f"  bsz={bsz}  seq_len={seq_len}  hidden={hidden}  num_target_layers={num_target_layers}")
+    print(f"  bsz={bsz}  ctx_len={ctx_len}  q_len(block_size)={q_len}  "
+          f"hidden={hidden}  num_target_layers={num_target_layers}")
 
     torch.manual_seed(args.seed)
-    noise_embedding = torch.randn(bsz, seq_len, hidden, dtype=torch.bfloat16, device=device)
-    target_hidden = torch.randn(bsz, seq_len, hidden * num_target_layers,
+    noise_embedding = torch.randn(bsz, q_len, hidden, dtype=torch.bfloat16, device=device)
+    target_hidden = torch.randn(bsz, ctx_len, hidden * num_target_layers,
                                 dtype=torch.bfloat16, device=device)
-    position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(bsz, -1)
+    # position_ids covers both context (0..ctx_len-1) and query (ctx_len..ctx_len+q_len-1)
+    position_ids = torch.arange(ctx_len + q_len, device=device).unsqueeze(0).expand(bsz, -1)
 
     with torch.no_grad():
         out_a = model_a(position_ids=position_ids, noise_embedding=noise_embedding,
