@@ -94,68 +94,29 @@ Ascend `torch_npu` wheels, so a single `pip install -r` does the whole job.
 
 ### Step 4 — Install sglang (required even for HF backend)
 
-`specforge/modeling/target/eagle3_target_model.py:5` contains an unconditional
-top-level import:
-
-```python
-import sglang.srt.managers.mm_utils as mm_utils
-```
-
-and `specforge/modeling/target/__init__.py` imports `eagle3_target_model` at
-top level. Hence **any `import specforge` requires sglang to be importable**,
-regardless of whether you use `--target-model-backend hf` or `sglang` at
-runtime.
-
-We do **not** install PyPI's `sglang==0.5.9` (pulls too many GPU-tagged deps),
-and we do **not** copy from any internal SpecForge fork (avoids inheriting
-their patches). The clean approach is to build sglang from a known-good
-**upstream `sgl-project/sglang`** commit. The version string
-`0.5.6.post3.dev2770+g4926ca275` from existing NPU deployments tells us the
-upstream commit is `4926ca275`.
+> sglang is a hard import-time dep of SpecForge (top-level
+> `import sglang.srt.managers.mm_utils` in `eagle3_target_model.py:5`).
+> We pull commit `4926ca275` from upstream sgl-project/sglang — neither
+> the PyPI release nor a vendored fork. Background:
+> see `upstream_strategy.md`.
 
 ```bash
-# 1. Leave the SpecForge dir, clone upstream sglang
 cd ..
 git clone https://github.com/sgl-project/sglang.git
 cd sglang
-
-# 2. Check out the validated commit
 git checkout 4926ca275
-git log --oneline 4926ca275 -1     # confirm the commit exists
 
-# 3. List the pyproject variants
-ls python/pyproject*.toml
-# Expected: pyproject.toml  pyproject_cpu.toml  pyproject_npu.toml  pyproject_xpu.toml
-# If only pyproject.toml is present, see Troubleshooting #6.
-
-# 4. Use the NPU pyproject variant (back up the default first for safety)
 cp python/pyproject.toml python/pyproject.toml.bak
 cp python/pyproject_npu.toml python/pyproject.toml
 
-# 5. Editable install. The [srt_npu] extra is empty in pyproject_npu.toml
-#    (srt_npu = []), so writing it is just upstream convention:
 pip install -e "python[srt_npu]" \
     -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
     --trusted-host mirrors.huaweicloud.com
 
-# 6. Verify sglang imports work
-python -c "
-import sglang
-print('sglang version:', sglang.__version__)
-import sglang.srt.managers.mm_utils
-print('mm_utils import OK')
-"
-# Expected version: 0.5.6.dev<N>+g4926ca275 (no 'post3' suffix — that's
-# upstream-foreign build metadata)
-
-# 7. Back to SpecForge for step 5
 cd ../SpecForge
 ```
 
-> Do **not** add `--no-deps` on the first attempt — let pip resolve deps and
-> see which ones install cleanly. If a specific GPU-only dep fails (typically
-> `flashinfer-python`, `sgl-kernel`, `vllm-flash-attn`), see
-> [Troubleshooting #6](#6-sglang-install-fails).
+Any failure → see [Troubleshooting #6](#6-sglang-install-fails).
 
 ### Step 5 — Editable-install SpecForge **without** re-resolving deps
 

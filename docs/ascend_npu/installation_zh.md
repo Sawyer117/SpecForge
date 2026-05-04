@@ -87,64 +87,29 @@ pip install -r docs/ascend_npu/requirements-ascend.txt
 > 如果镜像上没有 `torch_npu==2.9.0`，看
 > [常见问题 #1](#1-torch_npu290-镜像上找不到)。
 
-### 步骤 4 —— 装 sglang（即使你只用 HF backend 也必须装）
+### 步骤 4 —— 装 sglang（即使只用 HF backend 也必须装）
 
-SpecForge `specforge/modeling/target/eagle3_target_model.py:5` 有一句：
-
-```python
-import sglang.srt.managers.mm_utils as mm_utils
-```
-
-是顶层硬 import，`specforge/modeling/target/__init__.py` 又会顶层 import
-`eagle3_target_model`。所以**只要你 `import specforge`，sglang 就必须能 import**
-——不管你跑训练时传的是 `--target-model-backend hf` 还是 `sglang`。
-
-我们不装 PyPI 上的 `sglang==0.5.9`（拉太多 GPU-tagged 依赖），也不 copy 同事 fork
-里的 sglang（继承不该继承的 patch）。**正解是从 upstream `sgl-project/sglang`
-取一个已验证 commit**——同事 vendored 那份的版本字符串是
-`0.5.6.post3.dev2770+g4926ca275`，里面 `g4926ca275` 就是上游 commit 短哈希。
+> sglang 是 SpecForge import 阶段的硬依赖（`eagle3_target_model.py:5`
+> 顶层硬 import）。我们从 upstream sgl-project/sglang 取 commit `4926ca275`，
+> 不用 PyPI 也不 copy 同事 fork。背景见 `upstream_strategy_zh.md`。
 
 ```bash
-# 1. 离开 SpecForge 目录，clone upstream sglang
 cd ..
 git clone https://github.com/sgl-project/sglang.git
 cd sglang
-
-# 2. checkout 到验证过的 commit
 git checkout 4926ca275
-git log --oneline 4926ca275 -1     # 确认 commit 存在
 
-# 3. 看一下 python/ 下有几份 pyproject 备选
-ls python/pyproject*.toml
-# 期望: pyproject.toml  pyproject_cpu.toml  pyproject_npu.toml  pyproject_xpu.toml
-# 如果只看到 pyproject.toml 一份，跳到 [常见问题 #6](#6-sglang-装不上)。
-
-# 4. 用 NPU 版的 pyproject（先备份默认那份方便回退）
 cp python/pyproject.toml python/pyproject.toml.bak
 cp python/pyproject_npu.toml python/pyproject.toml
 
-# 5. editable 安装。[srt_npu] 这个 extra 是空的（pyproject_npu.toml 里 srt_npu = []），
-#   写不写都一样，遵循 upstream 习惯写上：
 pip install -e "python[srt_npu]" \
     -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
     --trusted-host mirrors.huaweicloud.com
 
-# 6. 验证 sglang import 通了
-python -c "
-import sglang
-print('sglang version:', sglang.__version__)
-import sglang.srt.managers.mm_utils
-print('mm_utils import OK')
-"
-# 期望版本类似: 0.5.6.dev<N>+g4926ca275  （没有 'post3' 后缀；那是同事的 build metadata）
-
-# 7. 回 SpecForge 目录，准备步骤 5
 cd ../SpecForge
 ```
 
-> 装这一步**第一次不要加 `--no-deps`**——让 pip 把 sglang 的依赖装齐，看到底
-> 哪些能装上。如果某条依赖（典型 `flashinfer-python` / `sgl-kernel` /
-> `vllm-flash-attn`）卡死编译失败，看 [常见问题 #6](#6-sglang-装不上)。
+任何一行报错见 [常见问题 #6](#6-sglang-装不上)。
 
 ### 步骤 5 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
 
