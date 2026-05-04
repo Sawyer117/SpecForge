@@ -161,6 +161,7 @@ from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN,
 import transformers
 import sglang
 import sgl_kernel_npu
+import triton                       # ← triton-ascend 注册的就是 'triton' 命名空间
 import specforge
 
 print("torch                    :", torch.__version__)
@@ -168,18 +169,26 @@ print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
 print("sglang                   :", sglang.__version__)
 print("sgl_kernel_npu path      :", sgl_kernel_npu.__path__)
+print("triton (from triton-ascend) :", triton.__version__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
 print("torch.npu.device_count() :", torch.npu.device_count())
 print("specforge import OK")
 PY
-
-# triton-ascend 装上之后的 module 名是 `triton`（不是 `triton_ascend`）；
-# 若想确认它真的装上了，单独验：
-pip show triton-ascend | grep -E '^(Name|Version):'
-# 期望输出 Name: triton-ascend / Version: 3.x.x
 ```
+
+> **注意**：`triton` 这个 module 名同时被 upstream NVIDIA `triton` 和 NPU
+> `triton-ascend` 占用——`import triton` 不能告诉你 import 的是哪一份。
+> 在 NPU 机器上单独装了 `triton-ascend`、且没装上游 `triton`，那 `import triton`
+> 拿到的就是 NPU 版。如果想完全确认是 triton-ascend：
+>
+> ```bash
+> pip show triton-ascend | grep -E '^(Name|Version):'
+> # 期望: Name: triton-ascend / Version: 3.x.x
+> python -c "import triton; print(triton.__file__)"
+> # 期望路径里能看到 'triton_ascend' 或 'triton/backends/ascend' 字样
+> ```
 
 ### 期望输出
 
@@ -189,6 +198,7 @@ torch_npu                : 2.9.0          (或 2.9.0.postN，看镜像实际有�
 transformers             : 4.57.1
 sglang                   : 0.5.9
 sgl_kernel_npu path      : ['/.../site-packages/sgl_kernel_npu']
+triton (from triton-ascend) : 3.x.x       (具体版本看 pip 装到的)
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True

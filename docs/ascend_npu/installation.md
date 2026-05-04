@@ -170,6 +170,7 @@ from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN,
 import transformers
 import sglang
 import sgl_kernel_npu
+import triton                       # triton-ascend registers itself as 'triton'
 import specforge
 
 print("torch                    :", torch.__version__)
@@ -177,18 +178,27 @@ print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
 print("sglang                   :", sglang.__version__)
 print("sgl_kernel_npu path      :", sgl_kernel_npu.__path__)
+print("triton (from triton-ascend) :", triton.__version__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
 print("torch.npu.device_count() :", torch.npu.device_count())
 print("specforge import OK")
 PY
-
-# triton-ascend installs as the `triton` module (not `triton_ascend`).
-# To verify it's installed, query pip directly:
-pip show triton-ascend | grep -E '^(Name|Version):'
-# Expected: Name: triton-ascend / Version: 3.x.x
 ```
+
+> **Note**: the `triton` module name is shared between upstream NVIDIA
+> `triton` and NPU `triton-ascend` — `import triton` alone cannot tell you
+> which provider you got. On an NPU box where only `triton-ascend` was
+> installed (and upstream `triton` was not), `import triton` is unambiguously
+> the NPU build. If you want to be absolutely sure:
+>
+> ```bash
+> pip show triton-ascend | grep -E '^(Name|Version):'
+> # Expected: Name: triton-ascend / Version: 3.x.x
+> python -c "import triton; print(triton.__file__)"
+> # Expected path should contain 'triton_ascend' or 'triton/backends/ascend'
+> ```
 
 ### Expected output
 
@@ -198,6 +208,7 @@ torch_npu                : 2.9.0          (or 2.9.0.postN, exact value depends o
 transformers             : 4.57.1
 sglang                   : 0.5.9
 sgl_kernel_npu path      : ['/.../site-packages/sgl_kernel_npu']
+triton (from triton-ascend) : 3.x.x       (whatever pip resolved to)
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
