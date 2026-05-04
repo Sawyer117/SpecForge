@@ -96,15 +96,15 @@ Ascend `torch_npu` wheels, so a single `pip install -r` does the whole job.
 
 > sglang is a hard import-time dep of SpecForge (top-level
 > `import sglang.srt.managers.mm_utils` in `eagle3_target_model.py:5`).
-> We pull commit `4926ca275` from upstream sgl-project/sglang — neither
-> the PyPI release nor a vendored fork. Background:
-> see `upstream_strategy.md`.
+> We pin to upstream **`v0.5.9`** — the same version SpecForge upstream's
+> `pyproject.toml` declares, and the earliest tag that ships
+> `pyproject_npu.toml`. Background: see `upstream_strategy.md`.
 
 ```bash
 cd ..
 git clone https://github.com/sgl-project/sglang.git
 cd sglang
-git checkout 4926ca275
+git checkout v0.5.9
 
 cp python/pyproject.toml python/pyproject.toml.bak
 cp python/pyproject_npu.toml python/pyproject.toml
@@ -157,7 +157,7 @@ PY
 torch                    : 2.9.0
 torch_npu                : 2.9.0          (or 2.9.0.postN, exact value depends on the mirror)
 transformers             : 4.57.1
-sglang                   : 0.5.6.dev<N>+g4926ca275
+sglang                   : 0.5.9
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -228,30 +228,28 @@ expected to be NPU-clean, so any failure here is genuinely interesting.
 
 ### 6. sglang install fails
 
-#### 6a. `git checkout 4926ca275` reports `unknown revision`
+#### 6a. `git checkout v0.5.9` reports `unknown revision`
 
-A shallow clone won't carry full history. Either re-clone deep, or fetch the
-rest:
-
-```bash
-git clone --no-single-branch https://github.com/sgl-project/sglang.git
-# Or, if already cloned:
-git fetch --unshallow
-```
-
-#### 6b. `ls python/pyproject*.toml` only shows `pyproject.toml`
-
-That commit predates the multi-platform pyproject split. Two fallbacks:
-
-Fallback 1, find the earliest upstream commit that introduced
-`pyproject_npu.toml`:
+`git clone` fetches all tags by default, so this should not normally happen.
+If your git config is unusual:
 
 ```bash
-git log --diff-filter=A --oneline -- python/pyproject_npu.toml
-# Take the earliest commit hash and re-do git checkout
+git fetch --tags
+git checkout v0.5.9
 ```
 
-Fallback 2, install the version SpecForge upstream pins from PyPI:
+#### 6b. `ls python/pyproject*.toml` does not show `pyproject_npu.toml`
+
+The checkout is not v0.5.9. Re-do it:
+
+```bash
+git fetch --tags
+git checkout v0.5.9
+ls python/pyproject*.toml    # expect 5 files: pyproject / cpu / npu / other / xpu
+```
+
+If still wrong, fall back to PyPI wheel install (no source build, but enough
+to satisfy the import):
 
 ```bash
 pip install sglang==0.5.9 --no-deps \
@@ -288,8 +286,16 @@ them**; they are not reached during sglang's import phase.
 
 #### 6d. `import sglang` fails with `cannot find libcudart.so` or other CUDA errors
 
-The commit eager-loads CUDA at import time. Fall back to an older upstream
-commit, or to PyPI's `sglang==0.5.4` (the version pinned in SpecForge's
+v0.5.9 eager-loads CUDA at import time. Try a slightly older release like
+`v0.5.8` (less NPU support but cleaner import path):
+
+```bash
+cd ../sglang
+git checkout v0.5.8
+ls python/pyproject_npu.toml || echo "this tag has no NPU pyproject; try v0.5.9 then PyPI fallback"
+```
+
+Or fall back to PyPI's `sglang==0.5.4` (the version pinned in SpecForge's
 `requirements-rocm.txt`):
 
 ```bash

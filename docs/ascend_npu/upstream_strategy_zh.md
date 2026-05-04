@@ -194,7 +194,7 @@ pip install -e . --no-deps
 > **注**：本文档**早期版本**说过"sglang 不需要装"。这是错的——`specforge/modeling/target/eagle3_target_model.py:5`
 > 顶层硬 import sglang，即便只用 HF backend 也要让它能 import。具体安装步骤
 > 见 `installation_zh.md` 的步骤 4（clone upstream sgl-project/sglang、checkout
-> commit `4926ca275`、把 `pyproject_npu.toml` swap 进来、`pip install -e`）。
+> tag `v0.5.9`、把 `pyproject_npu.toml` swap 进来、`pip install -e`）。
 
 ### 5.3 验证
 

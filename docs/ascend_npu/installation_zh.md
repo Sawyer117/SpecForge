@@ -90,14 +90,15 @@ pip install -r docs/ascend_npu/requirements-ascend.txt
 ### 步骤 4 —— 装 sglang（即使只用 HF backend 也必须装）
 
 > sglang 是 SpecForge import 阶段的硬依赖（`eagle3_target_model.py:5`
-> 顶层硬 import）。我们从 upstream sgl-project/sglang 取 commit `4926ca275`，
-> 不用 PyPI 也不 copy 同事 fork。背景见 `upstream_strategy_zh.md`。
+> 顶层硬 import）。我们从 upstream sgl-project/sglang 的 **`v0.5.9`** tag 装
+> ——这正好是 SpecForge upstream `pyproject.toml` 钉的版本，也是最早带
+> `pyproject_npu.toml` 的 release tag。背景见 `upstream_strategy_zh.md`。
 
 ```bash
 cd ..
 git clone https://github.com/sgl-project/sglang.git
 cd sglang
-git checkout 4926ca275
+git checkout v0.5.9
 
 cp python/pyproject.toml python/pyproject.toml.bak
 cp python/pyproject_npu.toml python/pyproject.toml
@@ -149,7 +150,7 @@ PY
 torch                    : 2.9.0
 torch_npu                : 2.9.0          (或 2.9.0.postN，看镜像实际有什么)
 transformers             : 4.57.1
-sglang                   : 0.5.6.dev<N>+g4926ca275
+sglang                   : 0.5.9
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -218,28 +219,26 @@ pip install "torch>=2.3.0"   # 这是 yunchang 唯一真正的硬依赖
 
 ### 6. sglang 装不上
 
-#### 6a. `git checkout 4926ca275` 报 `unknown revision`
+#### 6a. `git checkout v0.5.9` 报 `unknown revision`
 
-upstream 的浅 clone 默认不带全历史。换深 clone：
-
-```bash
-git clone --no-single-branch https://github.com/sgl-project/sglang.git
-# 或者已经 clone 完之后补：
-git fetch --unshallow
-```
-
-#### 6b. `ls python/pyproject*.toml` 只看到 `pyproject.toml` 一份
-
-说明这个 commit 太老，多平台 pyproject 还没引入。两条退路：
-
-退路 1，找最早引入 `pyproject_npu.toml` 的 upstream commit：
+git clone 默认带全 tag，正常情况下这条不会失败。如果你机器上 git 配置很不寻常导致没 fetch tag：
 
 ```bash
-git log --diff-filter=A --oneline -- python/pyproject_npu.toml
-# 取最早那个 commit hash，重做 git checkout
+git fetch --tags
+git checkout v0.5.9
 ```
 
-退路 2，直接装 PyPI 上 SpecForge upstream 钉的版本：
+#### 6b. `ls python/pyproject*.toml` 没看到 `pyproject_npu.toml`
+
+说明你机器上 checkout 的不是 v0.5.9。重新 checkout：
+
+```bash
+git fetch --tags
+git checkout v0.5.9
+ls python/pyproject*.toml    # 期望 5 份: pyproject / cpu / npu / other / xpu
+```
+
+如果还是不对，退到 PyPI wheel 装法（没源码 build 的麻烦，但足够 import）：
 
 ```bash
 pip install sglang==0.5.9 --no-deps \
@@ -275,9 +274,16 @@ python -c "import sglang.srt.managers.mm_utils"
 
 #### 6d. `import sglang` 时报 `cannot find libcudart.so` 或 CUDA 类错误
 
-说明这个 commit 的 sglang 在 import 阶段就 eager-load 了 CUDA 库。退到稍老的
-upstream commit 或用 PyPI 老版本，比如 `sglang==0.5.4`（SpecForge
-`requirements-rocm.txt` 钉的版本）：
+说明 v0.5.9 在 import 阶段就 eager-load 了 CUDA 库。退到稍老的 release，比如
+`v0.5.8`（NPU 支持稍弱但 import 路径更干净），重做 checkout：
+
+```bash
+cd ../sglang
+git checkout v0.5.8
+ls python/pyproject_npu.toml || echo "this tag has no NPU pyproject; try v0.5.9 then PyPI fallback"
+```
+
+或直接用 PyPI 老版本：
 
 ```bash
 pip install sglang==0.5.4 --no-deps -i ...

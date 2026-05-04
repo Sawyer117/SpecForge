@@ -209,7 +209,7 @@ commit we install. Without `--no-deps`, pip would happily overwrite both.
 > top-level `import sglang.srt.managers.mm_utils`, which gets triggered by
 > any `import specforge`, regardless of the runtime backend choice. The
 > correct install path is in `installation.md` Step 4 (clone upstream
-> sgl-project/sglang at commit `4926ca275`, swap in `pyproject_npu.toml`,
+> sgl-project/sglang at tag `v0.5.9`, swap in `pyproject_npu.toml`,
 > `pip install -e`).
 
 ### 5.3 Verification

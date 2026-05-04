@@ -19,9 +19,9 @@
 #     top-level `import sglang.srt.managers.mm_utils`, so sglang must be
 #     importable for any `import specforge` to work — even with HF backend
 #     at runtime. Install it via Step 4 of installation.md (clone upstream
-#     sgl-project/sglang, checkout commit 4926ca275, swap pyproject_npu.toml
-#     in, pip install -e). Don't put sglang here because the install needs
-#     a from-source build with a pyproject swap, not a wheel-pull.
+#     sgl-project/sglang, checkout tag v0.5.9, swap pyproject_npu.toml in,
+#     pip install -e). Don't put sglang here because the install needs a
+#     from-source build with a pyproject swap, not a wheel-pull.
 #   - flash-attn is NOT included. It has no NPU build; DFlash on NPU runs
 #     with --attention-backend sdpa.
 #   - yunchang is included as a dormant dependency. SpecForge imports it at
