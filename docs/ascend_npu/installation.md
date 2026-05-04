@@ -170,7 +170,6 @@ from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN,
 import transformers
 import sglang
 import sgl_kernel_npu
-import triton_ascend
 import specforge
 
 print("torch                    :", torch.__version__)
@@ -184,6 +183,11 @@ print("torch.npu.is_available() :", torch.npu.is_available())
 print("torch.npu.device_count() :", torch.npu.device_count())
 print("specforge import OK")
 PY
+
+# triton-ascend installs as the `triton` module (not `triton_ascend`).
+# To verify it's installed, query pip directly:
+pip show triton-ascend | grep -E '^(Name|Version):'
+# Expected: Name: triton-ascend / Version: 3.x.x
 ```
 
 ### Expected output
