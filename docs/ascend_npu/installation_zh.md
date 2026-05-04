@@ -129,7 +129,11 @@ git clone https://github.com/sgl-project/sgl-kernel-npu.git
 cd sgl-kernel-npu
 git checkout 2026.03.01.post1
 
-bash build.sh -a kernels
+# ★ 不要直接 bash build.sh —— upstream build.sh 会去读
+# /etc/Ascend/ascend_cann_install.info 拿到错误的 CANN 路径（多用户机器上常见）。
+# 用我们的 wrapper 绕过这个问题（不改 build.sh 源码）：
+bash $OLDPWD/SpecForge/docs/ascend_npu/build_sgl_kernel_npu.sh -a kernels
+
 pip install output/sgl_kernel_npu*.whl
 
 cd ../SpecForge

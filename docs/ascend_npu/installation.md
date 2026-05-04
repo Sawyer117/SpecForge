@@ -137,7 +137,12 @@ git clone https://github.com/sgl-project/sgl-kernel-npu.git
 cd sgl-kernel-npu
 git checkout 2026.03.01.post1
 
-bash build.sh -a kernels
+# ★ Do NOT run `bash build.sh` directly. Upstream build.sh reads
+# /etc/Ascend/ascend_cann_install.info and ignores your already-set
+# ASCEND_HOME_PATH — picks the wrong CANN on multi-user hosts. Use
+# our wrapper, which preserves the source tree intact:
+bash $OLDPWD/SpecForge/docs/ascend_npu/build_sgl_kernel_npu.sh -a kernels
+
 pip install output/sgl_kernel_npu*.whl
 
 cd ../SpecForge
