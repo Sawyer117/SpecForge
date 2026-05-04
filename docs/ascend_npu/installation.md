@@ -128,7 +128,7 @@ Any failure → see [Troubleshooting #6](#6-sglang-install-fails).
 > MoE expert-parallel path, which the HF backend never reaches).
 
 ```bash
-pip install triton-ascend==3.2.0rc4 \
+pip install triton-ascend \
     -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
     --trusted-host mirrors.huaweicloud.com
 
@@ -335,18 +335,18 @@ pip install sglang==0.5.4 --no-deps -i ...
 
 ### 7. `sgl_kernel_npu` or `triton-ascend` install fails
 
-#### 7a. `pip install triton-ascend==3.2.0rc4` not found
+#### 7a. `pip install triton-ascend` not found on the Huawei mirror
 
-Loosen the version pin and let pip pick the newest available:
+Mirrors occasionally lag — retry a few minutes later, or switch sources:
 
 ```bash
-pip install triton-ascend \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
+pip install triton-ascend
+# Or hit the public PyPI index explicitly:
+pip install triton-ascend -i https://pypi.org/simple/
 ```
 
-Note the version pip picked (e.g. `triton-ascend-3.2.0`) and update the
-docs to match.
+Note which version pip picked (`pip show triton-ascend | grep Version`).
+You only need to pin if a future kernel-compatibility issue forces it.
 
 #### 7b. `git checkout 2026.03.01.post1` reports `unknown revision`
 

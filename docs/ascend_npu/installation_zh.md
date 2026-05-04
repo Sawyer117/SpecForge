@@ -120,7 +120,7 @@ cd ../SpecForge
 > stable tag。**不**装 DeepEP（HF backend 不触达）。
 
 ```bash
-pip install triton-ascend==3.2.0rc4 \
+pip install triton-ascend \
     -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
     --trusted-host mirrors.huaweicloud.com
 
@@ -320,17 +320,18 @@ pip install sglang==0.5.4 --no-deps -i ...
 
 ### 7. `sgl_kernel_npu` 或 `triton-ascend` 装不上
 
-#### 7a. `pip install triton-ascend==3.2.0rc4` 找不到
+#### 7a. `pip install triton-ascend` 在镜像上找不到
 
-放宽版本约束让 pip 选最新可用：
+镜像偶尔索引有滞后，过几分钟重试或换镜像：
 
 ```bash
-pip install triton-ascend \
-    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
-    --trusted-host mirrors.huaweicloud.com
+pip install triton-ascend
+# 或显式走 PyPI 源：
+pip install triton-ascend -i https://pypi.org/simple/
 ```
 
-记下 pip 选了哪个版本（比如 `triton-ascend-3.2.0` 或更新），同步更新文档。
+记下 pip 实际选了哪个版本（`pip show triton-ascend | grep Version`），
+后续如果训练触发 kernel 不兼容再考虑钉版本。
 
 #### 7b. `git checkout 2026.03.01.post1` 报 `unknown revision`
 
