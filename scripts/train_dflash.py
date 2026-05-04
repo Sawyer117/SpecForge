@@ -132,6 +132,18 @@ def parse_args():
         default=1,
         help="The size of the tensor parallel for the target model",
     )
+    optimization_group.add_argument(
+        "--use-hsdp",
+        action="store_true",
+        help=(
+            "Use Hybrid Sharded Data Parallel for the draft model: shard "
+            "intra-node (across LOCAL_WORLD_SIZE NPUs) and replicate "
+            "inter-node. Cuts cross-node traffic by ~LOCAL_WORLD_SIZE "
+            "compared to default SHARD_GRAD_OP-over-WORLD. Only meaningful "
+            "when nnodes >= 2; on single node it degenerates to plain "
+            "SHARD_GRAD_OP and is a no-op."
+        ),
+    )
 
     tracker_group = parser.add_argument_group("tracker")
     TrackerArgs.add_args(tracker_group)
@@ -438,15 +450,42 @@ def main():
         loss_decay_gamma=args.loss_decay_gamma,
     )
 
-    dflash_model = FSDP(
-        dflash_model,
+    fsdp_kwargs = dict(
         use_orig_params=True,
         mixed_precision=MixedPrecision(
             param_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         ),
-        sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
     )
+    if args.use_hsdp:
+        # 2D mesh: (replicate=NNODES, shard=LOCAL_WORLD_SIZE).
+        # Intra-node ZeRO-2 sharding; inter-node grad AllReduce only.
+        local_world = int(os.environ.get("LOCAL_WORLD_SIZE", dist.get_world_size()))
+        world_size = dist.get_world_size()
+        if world_size % local_world != 0:
+            raise RuntimeError(
+                f"WORLD_SIZE ({world_size}) is not divisible by LOCAL_WORLD_SIZE "
+                f"({local_world}); HSDP requires equal NPUs per node."
+            )
+        nnodes = world_size // local_world
+        from torch.distributed.device_mesh import init_device_mesh
+        hsdp_mesh = init_device_mesh(
+            "cuda",  # transfer_to_npu redirects this to "npu" on Ascend
+            (nnodes, local_world),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        fsdp_kwargs.update(
+            sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2,
+            device_mesh=hsdp_mesh,
+        )
+        print_on_rank0(
+            f"HSDP enabled: replicate={nnodes} (inter-node), "
+            f"shard={local_world} (intra-node)"
+        )
+    else:
+        fsdp_kwargs.update(sharding_strategy=ShardingStrategy.SHARD_GRAD_OP)
+
+    dflash_model = FSDP(dflash_model, **fsdp_kwargs)
     print_with_rank("Initialized FSDP")
 
     start_epoch = ckpt_info[0]
