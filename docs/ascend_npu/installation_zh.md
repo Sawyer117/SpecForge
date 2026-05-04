@@ -112,7 +112,32 @@ cd ../SpecForge
 
 任何一行报错见 [常见问题 #6](#6-sglang-装不上)。
 
-### 步骤 5 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
+### 步骤 5 —— 装 NPU kernels（`sgl_kernel_npu` + `triton-ascend`）
+
+> sglang import 阶段会触达 `sgl_kernel_npu`（NPU 算子库），它又依赖
+> `triton-ascend`。前者从 upstream 源码 build，后者一条 pip 即可。
+> 我们用 upstream tag `2026.03.01.post1`——与 sglang v0.5.9 时间线匹配的最早
+> stable tag。**不**装 DeepEP（HF backend 不触达）。
+
+```bash
+pip install triton-ascend==3.2.0rc4 \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+cd ..
+git clone https://github.com/sgl-project/sgl-kernel-npu.git
+cd sgl-kernel-npu
+git checkout 2026.03.01.post1
+
+bash build.sh -a kernels
+pip install output/sgl_kernel_npu*.whl
+
+cd ../SpecForge
+```
+
+任何一行报错见 [常见问题 #7](#7-sgl_kernel_npu-或-triton-ascend-装不上)。
+
+### 步骤 6 —— editable 安装 SpecForge，**绕过它的 pyproject 依赖解析**
 
 ```bash
 pip install -e . --no-deps
@@ -122,7 +147,7 @@ pip install -e . --no-deps
 `torch==2.9.1`、`sglang==0.5.9` 这两条——前者跟你刚装的 2.9.0 冲突、后者跟你
 刚从源码装的 commit 版冲突，两条都会被 pip 强行覆盖装。
 
-### 步骤 6 —— 验证
+### 步骤 7 —— 验证
 
 ```bash
 python - <<'PY'
@@ -130,12 +155,15 @@ import torch, torch_npu
 from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN, HAS_NPU
 import transformers
 import sglang
+import sgl_kernel_npu
+import triton_ascend
 import specforge
 
 print("torch                    :", torch.__version__)
 print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
 print("sglang                   :", sglang.__version__)
+print("sgl_kernel_npu path      :", sgl_kernel_npu.__path__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
@@ -151,6 +179,7 @@ torch                    : 2.9.0
 torch_npu                : 2.9.0          (或 2.9.0.postN，看镜像实际有什么)
 transformers             : 4.57.1
 sglang                   : 0.5.9
+sgl_kernel_npu path      : ['/.../site-packages/sgl_kernel_npu']
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -287,6 +316,64 @@ ls python/pyproject_npu.toml || echo "this tag has no NPU pyproject; try v0.5.9 
 
 ```bash
 pip install sglang==0.5.4 --no-deps -i ...
+```
+
+### 7. `sgl_kernel_npu` 或 `triton-ascend` 装不上
+
+#### 7a. `pip install triton-ascend==3.2.0rc4` 找不到
+
+放宽版本约束让 pip 选最新可用：
+
+```bash
+pip install triton-ascend \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+```
+
+记下 pip 选了哪个版本（比如 `triton-ascend-3.2.0` 或更新），同步更新文档。
+
+#### 7b. `git checkout 2026.03.01.post1` 报 `unknown revision`
+
+这个 tag 上面我已经在 upstream 验过存在。如果你机器找不到：
+
+```bash
+git fetch --tags
+git checkout 2026.03.01.post1
+```
+
+#### 7c. `bash build.sh -a kernels` 失败
+
+先确认 CANN 已 source（步骤 0 那一坨），尤其 `set_env.sh`。
+build 脚本依赖 `ascend-toolkit` 暴露出来的 `nnal/atb` 等路径。
+
+```bash
+which msopgen   # 应该输出 CANN 工具链里的某个路径
+echo $ASCEND_HOME_PATH    # 应该非空
+```
+
+如果 CANN 已 source 还是失败，把 build 输出的最后 30 行原文给我。
+
+#### 7d. `pip install output/sgl_kernel_npu*.whl` 报缺包
+
+`sgl_kernel_npu` 运行时还会需要一些 Python 库（pybind11 之类），
+如果 pip resolver 抱怨，按 require 单独装即可：
+
+```bash
+pip install pybind11
+```
+
+#### 7e. 后续要不要装 DeepEP
+
+DFlash + HF backend **不需要 DeepEP**（HF backend 不调用 MoE 通信）。
+如果将来切到 sglang backend 跑 MoE 模型，再回来 build：
+
+```bash
+cd ../sgl-kernel-npu
+# A2 / 910b
+bash build.sh -a deepep2
+# A3
+bash build.sh -a deepep
+pip install output/deep_ep*.whl
 ```
 
 ---

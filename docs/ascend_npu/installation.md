@@ -118,7 +118,34 @@ cd ../SpecForge
 
 Any failure → see [Troubleshooting #6](#6-sglang-install-fails).
 
-### Step 5 — Editable-install SpecForge **without** re-resolving deps
+### Step 5 — Install NPU kernels (`sgl_kernel_npu` + `triton-ascend`)
+
+> sglang's import path touches `sgl_kernel_npu` (the NPU operator library),
+> which in turn needs `triton-ascend`. The former builds from upstream
+> source; the latter is one pip line. We use upstream tag
+> `2026.03.01.post1` — the earliest stable tag aligned with the sglang
+> v0.5.9 timeframe. We do **not** build DeepEP (only needed by sglang's
+> MoE expert-parallel path, which the HF backend never reaches).
+
+```bash
+pip install triton-ascend==3.2.0rc4 \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+
+cd ..
+git clone https://github.com/sgl-project/sgl-kernel-npu.git
+cd sgl-kernel-npu
+git checkout 2026.03.01.post1
+
+bash build.sh -a kernels
+pip install output/sgl_kernel_npu*.whl
+
+cd ../SpecForge
+```
+
+Any failure → see [Troubleshooting #7](#7-sgl_kernel_npu-or-triton-ascend-install-fails).
+
+### Step 6 — Editable-install SpecForge **without** re-resolving deps
 
 ```bash
 pip install -e . --no-deps
@@ -129,7 +156,7 @@ own `pyproject.toml` pins (`torch==2.9.1`, `sglang==0.5.9`), both of which
 conflict with what you installed in steps 3 and 4 — and pip would happily
 overwrite them.
 
-### Step 6 — Verify
+### Step 7 — Verify
 
 ```bash
 python - <<'PY'
@@ -137,12 +164,15 @@ import torch, torch_npu
 from yunchang.globals import PROCESS_GROUP, set_seq_parallel_pg, HAS_FLASH_ATTN, HAS_NPU
 import transformers
 import sglang
+import sgl_kernel_npu
+import triton_ascend
 import specforge
 
 print("torch                    :", torch.__version__)
 print("torch_npu                :", torch_npu.__version__)
 print("transformers             :", transformers.__version__)
 print("sglang                   :", sglang.__version__)
+print("sgl_kernel_npu path      :", sgl_kernel_npu.__path__)
 print("yunchang.HAS_NPU         :", HAS_NPU)
 print("yunchang.HAS_FLASH_ATTN  :", HAS_FLASH_ATTN)
 print("torch.npu.is_available() :", torch.npu.is_available())
@@ -158,6 +188,7 @@ torch                    : 2.9.0
 torch_npu                : 2.9.0          (or 2.9.0.postN, exact value depends on the mirror)
 transformers             : 4.57.1
 sglang                   : 0.5.9
+sgl_kernel_npu path      : ['/.../site-packages/sgl_kernel_npu']
 yunchang.HAS_NPU         : True
 yunchang.HAS_FLASH_ATTN  : False
 torch.npu.is_available() : True
@@ -300,6 +331,65 @@ Or fall back to PyPI's `sglang==0.5.4` (the version pinned in SpecForge's
 
 ```bash
 pip install sglang==0.5.4 --no-deps -i ...
+```
+
+### 7. `sgl_kernel_npu` or `triton-ascend` install fails
+
+#### 7a. `pip install triton-ascend==3.2.0rc4` not found
+
+Loosen the version pin and let pip pick the newest available:
+
+```bash
+pip install triton-ascend \
+    -i https://mirrors.huaweicloud.com/repository/pypi/simple/ \
+    --trusted-host mirrors.huaweicloud.com
+```
+
+Note the version pip picked (e.g. `triton-ascend-3.2.0`) and update the
+docs to match.
+
+#### 7b. `git checkout 2026.03.01.post1` reports `unknown revision`
+
+```bash
+git fetch --tags
+git checkout 2026.03.01.post1
+```
+
+#### 7c. `bash build.sh -a kernels` fails
+
+First confirm CANN is sourced (Step 0). The build script depends on paths
+exposed by `set_env.sh`.
+
+```bash
+which msopgen          # should print a path inside CANN's toolkit
+echo $ASCEND_HOME_PATH # should be non-empty
+```
+
+If CANN is sourced and the build still fails, paste the last 30 lines of
+build output.
+
+#### 7d. `pip install output/sgl_kernel_npu*.whl` complains about missing deps
+
+`sgl_kernel_npu` needs a few small Python libs at runtime (`pybind11` etc.).
+If pip's resolver complains, install them individually:
+
+```bash
+pip install pybind11
+```
+
+#### 7e. Should I install DeepEP later?
+
+DFlash + HF backend does **not** need DeepEP (the HF backend never calls
+MoE expert-parallel comm). If you later switch to the sglang backend with
+an MoE target, come back and build it:
+
+```bash
+cd ../sgl-kernel-npu
+# A2 / 910b
+bash build.sh -a deepep2
+# A3
+bash build.sh -a deepep
+pip install output/deep_ep*.whl
 ```
 
 ---
