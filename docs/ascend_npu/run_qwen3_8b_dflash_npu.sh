@@ -99,10 +99,20 @@ mkdir -p "$OUTPUT_DIR"
 
 cd "$ROOT_DIR"
 
+# Use explicit 127.0.0.1 instead of --standalone. --standalone resolves this
+# machine's hostname for rendezvous, which fails on hosts whose hostname is
+# a non-routable external DNS name (e.g. ISP-assigned reverse DNS).
+# 127.0.0.1 is always reachable.
+MASTER_ADDR_LOCAL=${MASTER_ADDR_LOCAL:-127.0.0.1}
+MASTER_PORT_LOCAL=${MASTER_PORT_LOCAL:-29533}
+
 ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES \
 torchrun \
-    --standalone \
     --nproc_per_node "$NUM_NPUS" \
+    --nnodes 1 \
+    --node_rank 0 \
+    --master_addr "$MASTER_ADDR_LOCAL" \
+    --master_port "$MASTER_PORT_LOCAL" \
     scripts/train_dflash.py \
     --target-model-path "$TARGET_MODEL" \
     --draft-config-path "$DRAFT_CONFIG" \
