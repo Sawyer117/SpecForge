@@ -46,10 +46,10 @@
 set -euo pipefail
 
 # ---- Required ----
-: "${MASTER_ADDR:?MASTER_ADDR is required (IP of node 0)}"
-: "${NNODES:?NNODES is required (total number of nodes)}"
-: "${NODE_RANK:?NODE_RANK is required (this node's rank, 0..NNODES-1)}"
-: "${HCCL_SOCKET_IFNAME:?HCCL_SOCKET_IFNAME is required (run \`ip a\`)}"
+: "${MASTER_ADDR:?MASTER_ADDR is required: IP of node 0}"
+: "${NNODES:?NNODES is required: total number of nodes}"
+: "${NODE_RANK:?NODE_RANK is required: this nodes rank, 0..NNODES-1}"
+: "${HCCL_SOCKET_IFNAME:?HCCL_SOCKET_IFNAME is required: run ip a to find a NIC}"
 
 # ---- Paths ----
 TARGET_MODEL=${TARGET_MODEL:-/share/canada_group_folder/ckpt/Qwen3-8B}
