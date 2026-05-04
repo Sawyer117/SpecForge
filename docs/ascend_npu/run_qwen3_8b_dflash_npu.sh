@@ -36,8 +36,13 @@ OUTPUT_DIR=${OUTPUT_DIR:-./outputs/qwen3-8b-dflash-npu}
 NUM_NPUS=${NUM_NPUS:-8}
 ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 
-# ---- Hyperparams (defaults from upstream examples/run_qwen3_8b_dflash_online.sh) ----
-BATCH_SIZE=${BATCH_SIZE:-2}
+# ---- Hyperparams ----
+# Memory budget on a 32 GB Atlas (Qwen3-8B target replicated per-NPU under HF
+# backend, max_len=3072): target ~16 GB + draft FSDP ~3.5 GB + activations
+# ~6–10 GB @ batch=1 = ~28 GB. batch=2 pushes activations to ~12–20 GB and
+# OOMs. Keep BATCH_SIZE=1; raise effective batch via ACCUMULATION_STEPS.
+BATCH_SIZE=${BATCH_SIZE:-1}
+ACCUMULATION_STEPS=${ACCUMULATION_STEPS:-1}
 MAX_LENGTH=${MAX_LENGTH:-3072}
 NUM_EPOCHS=${NUM_EPOCHS:-6}
 LR=${LR:-6e-4}
@@ -75,6 +80,7 @@ OUTPUT_DIR                : $OUTPUT_DIR
 NUM_NPUS                  : $NUM_NPUS
 ASCEND_RT_VISIBLE_DEVICES : $ASCEND_RT_VISIBLE_DEVICES
 BATCH_SIZE                : $BATCH_SIZE
+ACCUMULATION_STEPS        : $ACCUMULATION_STEPS
 MAX_LENGTH                : $MAX_LENGTH
 NUM_EPOCHS                : $NUM_EPOCHS
 LEARNING_RATE             : $LR
@@ -106,6 +112,7 @@ torchrun \
     --attention-backend sdpa \
     --num-epochs "$NUM_EPOCHS" \
     --batch-size "$BATCH_SIZE" \
+    --accumulation-steps "$ACCUMULATION_STEPS" \
     --max-length "$MAX_LENGTH" \
     --learning-rate "$LR" \
     --num-anchors "$NUM_ANCHORS" \
