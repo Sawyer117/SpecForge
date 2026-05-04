@@ -37,6 +37,146 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from specforge.modeling.draft.dflash import DFlashDraftModel
 
 
+# ----------------------------------------------------------------------------
+# Monkey-patch spec_generate for NPU compatibility.
+#
+# Upstream specforge/modeling/draft/dflash.py:346 does:
+#   (block_output_ids[:, 1:] == posterior[:, :-1]).cumprod(dim=1)
+# The == produces a bool tensor; NPU's aclnnCumprod does not support bool
+# (only float/int dtypes). On CUDA this works because cumprod silently
+# accepts bool. On NPU it crashes:
+#   AclNN_Parameter_Error: Tensor input not implemented for DT_BOOL
+# Fix: cast bool->int before cumprod. This patch is upstream-PR worthy.
+# ----------------------------------------------------------------------------
+_ORIGINAL_SPEC_GENERATE = DFlashDraftModel.spec_generate
+
+
+@torch.inference_mode()
+def _spec_generate_npu_safe(self, target, input_ids, max_new_tokens,
+                            stop_token_ids, temperature):
+    """NPU-safe drop-in for DFlashDraftModel.spec_generate.
+
+    Identical to the original method body except the one cumprod-on-bool
+    line on dflash.py:346 has been changed to cast to int first.
+    """
+    from transformers import DynamicCache
+    from specforge.modeling.draft.dflash import (
+        sample,
+        extract_context_feature,
+    )
+
+    self.eval()
+    num_input_tokens = input_ids.shape[1]
+    max_length = num_input_tokens + max_new_tokens
+
+    block_size = self.block_size
+    output_ids = torch.full(
+        (1, max_length + block_size),
+        self.mask_token_id,
+        dtype=torch.long,
+        device=target.device,
+    )
+    position_ids = torch.arange(
+        output_ids.shape[1], device=target.device,
+    ).unsqueeze(0)
+
+    past_key_values_target = DynamicCache()
+    past_key_values_draft = DynamicCache()
+
+    # Prefill
+    output = target(
+        input_ids,
+        position_ids=position_ids[:, :num_input_tokens],
+        past_key_values=past_key_values_target,
+        use_cache=True,
+        logits_to_keep=1,
+        output_hidden_states=True,
+    )
+    output_ids[:, :num_input_tokens] = input_ids
+    output_ids[:, num_input_tokens : num_input_tokens + 1] = sample(
+        output.logits, temperature,
+    )
+    target_hidden = extract_context_feature(
+        output.hidden_states, self.target_layer_ids,
+    )
+
+    acceptance_lengths = []
+    start = input_ids.shape[1]
+    while start < max_length:
+        block_output_ids = output_ids[:, start : start + block_size].clone()
+        block_position_ids = position_ids[:, start : start + block_size]
+        noise_embedding = target.model.embed_tokens(block_output_ids)
+        draft_logits = target.lm_head(
+            self(
+                target_hidden=target_hidden,
+                noise_embedding=noise_embedding,
+                position_ids=position_ids[
+                    :, past_key_values_draft.get_seq_length() : start + block_size
+                ],
+                past_key_values=past_key_values_draft,
+                use_cache=True,
+                is_causal=False,
+            )[:, -block_size + 1 :, :]
+        )
+        past_key_values_draft.crop(start)
+        block_output_ids[:, 1:] = sample(draft_logits)
+
+        output = target(
+            block_output_ids,
+            position_ids=block_position_ids,
+            past_key_values=past_key_values_target,
+            use_cache=True,
+            output_hidden_states=True,
+        )
+
+        posterior = sample(output.logits, temperature)
+        # ---- NPU FIX: cast bool to int before cumprod ----
+        acceptance_length = (
+            (block_output_ids[:, 1:] == posterior[:, :-1])
+            .int()                # <-- the only diff from upstream
+            .cumprod(dim=1)
+            .sum(dim=1)[0]
+            .item()
+        )
+        # ---- end NPU FIX ----
+        output_ids[:, start : start + acceptance_length + 1] = block_output_ids[
+            :, : acceptance_length + 1
+        ]
+        output_ids[:, start + acceptance_length + 1] = posterior[
+            :, acceptance_length
+        ]
+        start += acceptance_length + 1
+        past_key_values_target.crop(start)
+        target_hidden = extract_context_feature(
+            output.hidden_states, self.target_layer_ids,
+        )[:, : acceptance_length + 1, :]
+        acceptance_lengths.append(acceptance_length + 1)
+        if stop_token_ids is not None and any(
+            stop_token_id in output_ids[:, num_input_tokens:]
+            for stop_token_id in stop_token_ids
+        ):
+            break
+
+    output_ids = output_ids[:, :max_length]
+    output_ids = output_ids[:, output_ids[0] != self.mask_token_id]
+    if stop_token_ids is not None and len(stop_token_ids) > 0:
+        stop_ids_t = torch.tensor(stop_token_ids, device=output_ids.device)
+        stop_token_indices = torch.isin(
+            output_ids[0][num_input_tokens:], stop_ids_t,
+        ).nonzero(as_tuple=True)[0]
+        if stop_token_indices.numel() > 0:
+            output_ids = output_ids[
+                :, : num_input_tokens + stop_token_indices[0] + 1
+            ]
+    # Stash acceptance lengths on the instance for the caller to read.
+    self._last_acceptance_lengths = acceptance_lengths
+    return output_ids
+
+
+DFlashDraftModel.spec_generate = _spec_generate_npu_safe
+print("[npu-patch] DFlashDraftModel.spec_generate patched: bool.cumprod() -> int().cumprod()")
+
+
 DEFAULT_PROMPTS = [
     "Explain in one sentence what speculative decoding is.",
     "List three differences between Python and Rust.",
@@ -123,6 +263,7 @@ def main():
         text_a = tokenizer.decode(
             out_a[0, input_ids.shape[1]:].tolist(), skip_special_tokens=True,
         )
+        acc_a = getattr(draft_a, "_last_acceptance_lengths", [])
 
         out_b = draft_b.spec_generate(
             target=target,
@@ -134,9 +275,12 @@ def main():
         text_b = tokenizer.decode(
             out_b[0, input_ids.shape[1]:].tolist(), skip_special_tokens=True,
         )
+        acc_b = getattr(draft_b, "_last_acceptance_lengths", [])
 
         print(f"\n  --- ckpt A output ---\n  {text_a!r}")
+        print(f"  acceptance: {acceptance_stats(acc_a)}")
         print(f"\n  --- ckpt B output ---\n  {text_b!r}")
+        print(f"  acceptance: {acceptance_stats(acc_b)}")
 
         # Compare token sequences (excluding the prompt prefix)
         gen_a = out_a[0, input_ids.shape[1]:].tolist()
