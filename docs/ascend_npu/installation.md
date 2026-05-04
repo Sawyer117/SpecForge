@@ -121,11 +121,17 @@ Any failure → see [Troubleshooting #6](#6-sglang-install-fails).
 ### Step 5 — Install NPU kernels (`sgl_kernel_npu` + `triton-ascend`)
 
 > sglang's import path touches `sgl_kernel_npu` (the NPU operator library),
-> which in turn needs `triton-ascend`. The former builds from upstream
-> source; the latter is one pip line. We use upstream tag
-> `2026.03.01.post1` — the earliest stable tag aligned with the sglang
-> v0.5.9 timeframe. We do **not** build DeepEP (only needed by sglang's
-> MoE expert-parallel path, which the HF backend never reaches).
+> which in turn needs `triton-ascend`. The former builds from source; the
+> latter is one pip line. We do **not** build DeepEP (only needed by
+> sglang's MoE expert-parallel path, which the HF backend never reaches).
+>
+> About the source: upstream `sgl-project/sgl-kernel-npu`'s `build.sh` has a
+> bug on multi-user NPU hosts — it ignores any pre-set `ASCEND_HOME_PATH`
+> and instead reads `/etc/Ascend/ascend_cann_install.info`, which often
+> points to another user's CANN install
+> ([PR #460](https://github.com/sgl-project/sgl-kernel-npu/pull/460) submitted).
+> Until it merges upstream, install from the fork branch `npu-install-stable`
+> — it is upstream stable tag `2026.03.01.post1` with the PR cherry-picked.
 
 ```bash
 pip install triton-ascend \
@@ -133,16 +139,10 @@ pip install triton-ascend \
     --trusted-host mirrors.huaweicloud.com
 
 cd ..
-git clone https://github.com/sgl-project/sgl-kernel-npu.git
+git clone -b npu-install-stable https://github.com/Sawyer117/sgl-kernel-npu.git
 cd sgl-kernel-npu
-git checkout 2026.03.01.post1
 
-# ★ Do NOT run `bash build.sh` directly. Upstream build.sh reads
-# /etc/Ascend/ascend_cann_install.info and ignores your already-set
-# ASCEND_HOME_PATH — picks the wrong CANN on multi-user hosts. Use
-# our wrapper, which preserves the source tree intact:
-bash $OLDPWD/SpecForge/docs/ascend_npu/build_sgl_kernel_npu.sh -a kernels
-
+bash build.sh -a kernels
 pip install output/sgl_kernel_npu*.whl
 
 cd ../SpecForge

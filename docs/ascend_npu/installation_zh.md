@@ -115,9 +115,15 @@ cd ../SpecForge
 ### 步骤 5 —— 装 NPU kernels（`sgl_kernel_npu` + `triton-ascend`）
 
 > sglang import 阶段会触达 `sgl_kernel_npu`（NPU 算子库），它又依赖
-> `triton-ascend`。前者从 upstream 源码 build，后者一条 pip 即可。
-> 我们用 upstream tag `2026.03.01.post1`——与 sglang v0.5.9 时间线匹配的最早
-> stable tag。**不**装 DeepEP（HF backend 不触达）。
+> `triton-ascend`。前者从源码 build，后者一条 pip 即可。
+> **不**装 DeepEP（HF backend 不触达）。
+>
+> 关于源码出处：upstream `sgl-project/sgl-kernel-npu` 的 `build.sh` 在多用户
+> NPU 主机上有个 bug —— 它无视已 export 的 `ASCEND_HOME_PATH`，直接读
+> `/etc/Ascend/ascend_cann_install.info`，会用错另一个用户的 CANN 路径
+> （[issue #460](https://github.com/sgl-project/sgl-kernel-npu/pull/460) 已提 PR）。
+> 在 PR 合入 upstream 之前，我们从 fork 的 `npu-install-stable` 分支装——它
+> 是 upstream stable tag `2026.03.01.post1` + 上述 PR 的 cherry-pick。
 
 ```bash
 pip install triton-ascend \
@@ -125,15 +131,10 @@ pip install triton-ascend \
     --trusted-host mirrors.huaweicloud.com
 
 cd ..
-git clone https://github.com/sgl-project/sgl-kernel-npu.git
+git clone -b npu-install-stable https://github.com/Sawyer117/sgl-kernel-npu.git
 cd sgl-kernel-npu
-git checkout 2026.03.01.post1
 
-# ★ 不要直接 bash build.sh —— upstream build.sh 会去读
-# /etc/Ascend/ascend_cann_install.info 拿到错误的 CANN 路径（多用户机器上常见）。
-# 用我们的 wrapper 绕过这个问题（不改 build.sh 源码）：
-bash $OLDPWD/SpecForge/docs/ascend_npu/build_sgl_kernel_npu.sh -a kernels
-
+bash build.sh -a kernels
 pip install output/sgl_kernel_npu*.whl
 
 cd ../SpecForge

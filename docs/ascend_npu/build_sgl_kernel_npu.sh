@@ -3,6 +3,13 @@
 # Wrapper for sgl-kernel-npu's build.sh that bypasses its hard-coded read of
 # /etc/Ascend/ascend_cann_install.info.
 #
+# *** STATUS: legacy / fallback. ***
+# The recommended install path now uses the fork branch
+# `Sawyer117/sgl-kernel-npu#npu-install-stable`, which has the same fix
+# baked into build.sh source. This wrapper is kept only for the case where
+# you must build from upstream sgl-project/sgl-kernel-npu directly while
+# PR #460 is still open. See docs/ascend_npu/installation.md Step 5.
+#
 # Background:
 #   Upstream sgl-kernel-npu/build.sh:97-99 reads /etc/Ascend/ascend_cann_install.info
 #   to find the CANN toolkit and unconditionally sources its set_env.sh — even
