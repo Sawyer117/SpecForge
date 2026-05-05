@@ -40,7 +40,14 @@ TP_SIZE=${TP_SIZE:-$NUM_NPUS}     # target sharded across all NPUs by default
 ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 
 # ---- DFlash hyperparams ----
-BATCH_SIZE=${BATCH_SIZE:-2}
+# Memory budget on a 64 GB Atlas with sglang co-located: target weights
+# (Qwen3-8B / TP) + sglang KV pool (mem_fraction_static * remaining HBM)
+# + FSDP draft + activations. batch=1 leaves comfortable headroom; batch=2
+# is what the HF launcher used to default to and OOMs here once sglang's
+# KV pool is reserved on top of training memory. Keep BATCH_SIZE=1; raise
+# effective batch via ACCUMULATION_STEPS if needed.
+BATCH_SIZE=${BATCH_SIZE:-1}
+ACCUMULATION_STEPS=${ACCUMULATION_STEPS:-1}
 MAX_LENGTH=${MAX_LENGTH:-3072}
 NUM_EPOCHS=${NUM_EPOCHS:-6}
 LR=${LR:-6e-4}
@@ -131,6 +138,7 @@ torchrun \
     --sglang-mem-fraction-static "$SGLANG_MEM_FRACTION_STATIC" \
     --num-epochs "$NUM_EPOCHS" \
     --batch-size "$BATCH_SIZE" \
+    --accumulation-steps "$ACCUMULATION_STEPS" \
     --max-length "$MAX_LENGTH" \
     --learning-rate "$LR" \
     --num-anchors "$NUM_ANCHORS" \
