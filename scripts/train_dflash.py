@@ -3,6 +3,7 @@
 """DFlash Training Script."""
 
 import argparse
+import functools
 import logging
 import math
 import os
@@ -14,8 +15,10 @@ from typing import Optional, Tuple
 import torch
 import torch.distributed as dist
 from accelerate.utils import set_seed
+from torch.distributed.fsdp import BackwardPrefetch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision, ShardingStrategy, StateDictType
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoConfig, AutoTokenizer
@@ -25,7 +28,7 @@ from specforge.args import SGLangBackendArgs, TrackerArgs
 from specforge.core.dflash import OnlineDFlashModel
 from specforge.data import build_eagle3_dataset, prepare_dp_dataloaders
 from specforge.distributed import destroy_distributed, get_dp_group, init_distributed
-from specforge.modeling.draft.dflash import DFlashDraftModel
+from specforge.modeling.draft.dflash import DFlashDraftModel, Qwen3DFlashDecoderLayer
 from specforge.modeling.target.dflash_target_model import (
     DFlashTargetModel,
     get_dflash_target_model,
@@ -452,6 +455,13 @@ def main():
 
     fsdp_kwargs = dict(
         use_orig_params=True,
+        auto_wrap_policy=functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={Qwen3DFlashDecoderLayer},
+        ),
+        forward_prefetch=True,
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        limit_all_gathers=True,
         mixed_precision=MixedPrecision(
             param_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
