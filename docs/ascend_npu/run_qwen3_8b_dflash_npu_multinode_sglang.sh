@@ -6,17 +6,25 @@
 # run_qwen3_8b_dflash_npu_multinode.sh with the in-process sglang target
 # backend from run_qwen3_8b_dflash_npu_sglang.sh.
 #
-# Mesh layout (defaults for 2 nodes × 8 NPUs = 16 ranks):
+# Mesh layout (defaults for 2 nodes × 8 NPUs = 16 ranks, TP=2 → DP=8):
 #
-#                 ┌──────────────── node 0 ────────────────┐  ┌─────── node 1 ───────┐
-#   global rank   0   1   2   3   4   5   6   7              8  9  ...  15
-#   target TP     ▔▔▔▔▔▔▔▔▔▔ TP=8 (one replica) ▔▔▔▔▔▔▔▔▔     ▔▔▔ TP=8 (replica) ▔▔▔
-#   draft DP      ░░░░░░░░░░ data-parallel across all 16 ░░░░░░░░░░░░░░░░░░░░░░░░░░░
+#                 ┌──────────────── node 0 ────────────────┐  ┌──────────── node 1 ────────────┐
+#   global rank   0  1   2  3   4  5   6  7                  8  9   10 11   12 13   14 15
+#   target TP     [TP=2][TP=2] [TP=2] [TP=2]                 [TP=2][TP=2]  [TP=2] [TP=2]
+#                  rep0  rep1   rep2   rep3                   rep4  rep5    rep6   rep7
+#   draft DP      ░░░░░░░░░░ data-parallel across all 16 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 #
-# So the target is TP-sharded *inside* each node (one full replica per node);
-# the draft sees DP=NNODES across nodes. No cross-node TP all-reduce — that
-# path is not validated for sglang on NPU and would push per-layer collectives
-# onto the slow inter-node link.
+# 8 target replicas total (4 per node), each TP-sharded across 2 NPUs. All
+# TP groups stay intra-node (TP_SIZE divides NPUS_PER_NODE). The draft is
+# data-parallel across all 16 ranks. No cross-node TP all-reduce — that
+# path is not validated for sglang on NPU and would push per-layer
+# collectives onto the slow inter-node link.
+#
+# TP=2 is a sane default for an 8B target on 64GB Atlas — TP=8 leaves only
+# ~1B target params per NPU and burns most of the per-rank budget on a
+# replica count of 2. TP=2 / DP=8 trades ~4x more target weight per NPU
+# (~8GB vs ~2GB) for 4x more DP replicas, which usually wins for training.
+# Override with TP_SIZE=4 / TP_SIZE=8 if you'd rather have headroom for KV.
 #
 # USAGE
 #   On EVERY node, run this script with NODE_RANK set per node.
@@ -75,10 +83,11 @@ OUTPUT_DIR=${OUTPUT_DIR:-./outputs/qwen3-8b-dflash-npu-multinode-sglang}
 NPUS_PER_NODE=${NPUS_PER_NODE:-8}
 ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 
-# Target TP defaults to NPUS_PER_NODE (intra-node only). Cross-node TP is
+# Target TP. Defaults to 2 → 8 replicas (DP=8) on a 16-rank world. TP must
+# divide NPUS_PER_NODE so TP groups stay intra-node. Cross-node TP is
 # possible by setting TP_SIZE > NPUS_PER_NODE but is NOT validated on NPU
 # and will be slow because every TP all-reduce hits the inter-node link.
-TP_SIZE=${TP_SIZE:-$NPUS_PER_NODE}
+TP_SIZE=${TP_SIZE:-2}
 
 # ---- Torchrun rendezvous ----
 MASTER_PORT=${MASTER_PORT:-29533}
