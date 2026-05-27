@@ -107,7 +107,12 @@ def parse_args():
     dataset_group.add_argument(
         "--build-dataset-num-proc",
         type=int,
-        default=int(os.environ.get("SPECFORGE_DATA_NUM_PROC", 8)),
+        default=int(
+            os.environ.get(
+                "SPECFORGE_DATA_NUM_PROC",
+                max(8, int((os.cpu_count() or 8) * 0.6)),
+            )
+        ),
     )
 
     training_group = parser.add_argument_group("training")
