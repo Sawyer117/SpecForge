@@ -28,7 +28,7 @@ from specforge.args import SGLangBackendArgs, TrackerArgs
 from specforge.core.dflash import OnlineDFlashModel
 from specforge.data import build_eagle3_dataset, prepare_dp_dataloaders
 from specforge.distributed import destroy_distributed, get_dp_group, init_distributed
-from specforge.modeling.draft.dflash import DFlashDraftModel, Qwen3DFlashDecoderLayer
+from specforge.modeling.draft.dflash import DFlashDraftModel
 from specforge.modeling.target.dflash_target_model import (
     DFlashTargetModel,
     get_dflash_target_model,
@@ -473,15 +473,30 @@ def main():
     if _no_overlap:
         print_on_rank0("FSDP overlap DISABLED (single-unit wrap, no prefetch)")
     else:
-        fsdp_kwargs.update(
-            auto_wrap_policy=functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={Qwen3DFlashDecoderLayer},
-            ),
-            forward_prefetch=True,
-            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-            limit_all_gathers=True,
-        )
+        # Resolve the draft model's transformer block class(es) from its
+        # _no_split_modules so the wrap policy stays architecture-agnostic
+        # instead of hardcoding a specific decoder-layer class.
+        block_names = set(getattr(draft_model, "_no_split_modules", None) or [])
+        block_classes = {
+            type(m)
+            for m in dflash_model.modules()
+            if type(m).__name__ in block_names
+        }
+        if block_classes:
+            fsdp_kwargs.update(
+                auto_wrap_policy=functools.partial(
+                    transformer_auto_wrap_policy,
+                    transformer_layer_cls=block_classes,
+                ),
+                forward_prefetch=True,
+                backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+                limit_all_gathers=True,
+            )
+        else:
+            print_on_rank0(
+                "No _no_split_modules on draft model; single-unit FSDP wrap "
+                "(no compute-comm overlap)."
+            )
     if args.use_hsdp:
         # 2D mesh: (replicate=NNODES, shard=LOCAL_WORLD_SIZE).
         # Intra-node ZeRO-2 sharding; inter-node grad AllReduce only.
