@@ -453,20 +453,30 @@ def main():
         loss_decay_gamma=args.loss_decay_gamma,
     )
 
+    # Per-layer FSDP wrap + prefetch lets AG/RS/AR overlap with compute.
+    # Set SPECFORGE_FSDP_NO_OVERLAP=1 to fall back to the old single-unit wrap
+    # (whole model = one FSDP unit, all collectives serial on critical path) —
+    # for A/B testing the overlap speedup.
+    _no_overlap = os.environ.get("SPECFORGE_FSDP_NO_OVERLAP", "0") == "1"
     fsdp_kwargs = dict(
         use_orig_params=True,
-        auto_wrap_policy=functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={Qwen3DFlashDecoderLayer},
-        ),
-        forward_prefetch=True,
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        limit_all_gathers=True,
         mixed_precision=MixedPrecision(
             param_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         ),
     )
+    if _no_overlap:
+        print_on_rank0("FSDP overlap DISABLED (single-unit wrap, no prefetch)")
+    else:
+        fsdp_kwargs.update(
+            auto_wrap_policy=functools.partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls={Qwen3DFlashDecoderLayer},
+            ),
+            forward_prefetch=True,
+            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+            limit_all_gathers=True,
+        )
     if args.use_hsdp:
         # 2D mesh: (replicate=NNODES, shard=LOCAL_WORLD_SIZE).
         # Intra-node ZeRO-2 sharding; inter-node grad AllReduce only.
