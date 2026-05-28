@@ -212,7 +212,18 @@ def main():
                    help="optional: limit prompts per category (smoke test)")
     p.add_argument("--out-jsonl", default=None,
                    help="optional: write per-prompt results to jsonl")
+    p.add_argument("--shard-rank", type=int, default=0,
+                   help="data-parallel shard: this process's rank (0-indexed)")
+    p.add_argument("--num-shards", type=int, default=1,
+                   help="data-parallel shard: total number of shards. "
+                        "Each shard processes prompts where idx %% num_shards == shard_rank. "
+                        "Launch num_shards instances in parallel, one per NPU, "
+                        "for near-linear speedup. Aggregate via cat *.jsonl.")
     args = p.parse_args()
+    if not (0 <= args.shard_rank < args.num_shards):
+        raise SystemExit(
+            f"--shard-rank ({args.shard_rank}) must be in [0, {args.num_shards})"
+        )
 
     print(f"[load] target: {args.target_model}", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -242,7 +253,23 @@ def main():
         questions = filtered
     if args.limit:
         questions = questions[:args.limit]
-    print(f"       using {len(questions)} after filters", flush=True)
+
+    # Data-parallel sharding: keep only prompts whose global index hits this rank.
+    # Same filtering AFTER limit/limit-per-category so the smoke-test subsets
+    # behave consistently.
+    if args.num_shards > 1:
+        all_count = len(questions)
+        questions = [
+            q for i, q in enumerate(questions)
+            if i % args.num_shards == args.shard_rank
+        ]
+        print(
+            f"       shard {args.shard_rank}/{args.num_shards}: "
+            f"{len(questions)}/{all_count} prompts",
+            flush=True,
+        )
+    else:
+        print(f"       using {len(questions)} after filters", flush=True)
 
     eos_ids = (
         [tokenizer.eos_token_id]
