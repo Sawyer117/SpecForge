@@ -46,13 +46,21 @@ class BF16Optimizer:
                 )
 
         # ============================================================
-        # DIAG (issue #9): clip_grad_norm_ on FSDP-sharded params sees
-        # only the LOCAL shard's L2 norm, not the true global norm.
-        # Set SPECFORGE_DIAG_CLIP_NORM=1 to print per-rank local vs
-        # global norm + the clip factor each version would apply.
-        # Default off => zero overhead, zero behavior change.
+        # Issue #9: clip_grad_norm_ on FSDP-sharded fp32_params sees only
+        # the LOCAL shard's L2 norm on each rank, not the true global norm.
+        # Per-rank clip factors differ, and clipping is much less aggressive
+        # than max_grad_norm intends.
+        #
+        # Env toggles (both default OFF => zero overhead, current behavior):
+        #   SPECFORGE_DIAG_CLIP_NORM=1 => print per-rank local vs global norm
+        #   SPECFORGE_FIX_CLIP_NORM=1  => apply FSDP-aware (global-norm) clip
+        #                                 instead of the buggy local-only one
         # ============================================================
-        if int(os.environ.get("SPECFORGE_DIAG_CLIP_NORM", "0")):
+        _diag = int(os.environ.get("SPECFORGE_DIAG_CLIP_NORM", "0"))
+        _fix = int(os.environ.get("SPECFORGE_FIX_CLIP_NORM", "0"))
+
+        global_norm = None
+        if _diag or _fix:
             with torch.no_grad():
                 grads = [p.grad for p in self.fp32_params if p.grad is not None]
                 if grads:
@@ -69,32 +77,50 @@ class BF16Optimizer:
                     )
                     if world > 1:
                         dist.all_reduce(global_sq, op=dist.ReduceOp.SUM)
-                    rank = dist.get_rank() if world > 1 else 0
-                    local_norm = local_sq.sqrt().item()
-                    global_norm = global_sq.sqrt().item()
-                    ratio = local_norm / max(global_norm, 1e-12)
-                    local_clip = min(
-                        1.0, self.max_grad_norm / max(local_norm, 1e-12)
-                    )
-                    global_clip = min(
-                        1.0, self.max_grad_norm / max(global_norm, 1e-12)
-                    )
-                    fires_buggy = (
-                        "BUGGY_FIRES" if local_clip < 1.0 else "no_local_clip"
-                    )
-                    fires_true = (
-                        "TRUE_FIRES" if global_clip < 1.0 else "no_global_clip"
-                    )
-                    print(
-                        f"[CLIP_DIAG r{rank}/{world}] "
-                        f"local={local_norm:.4f} global={global_norm:.4f} "
-                        f"ratio={ratio:.4f} | "
-                        f"local_clip={local_clip:.4f} global_clip={global_clip:.4f} "
-                        f"({fires_buggy}, {fires_true})",
-                        flush=True,
-                    )
+                    local_norm = local_sq.sqrt()
+                    global_norm = global_sq.sqrt()
 
-        torch.nn.utils.clip_grad_norm_(self.fp32_params, self.max_grad_norm)
+                    if _diag:
+                        rank = dist.get_rank() if world > 1 else 0
+                        local_v = local_norm.item()
+                        global_v = global_norm.item()
+                        ratio = local_v / max(global_v, 1e-12)
+                        local_clip = min(
+                            1.0, self.max_grad_norm / max(local_v, 1e-12)
+                        )
+                        global_clip = min(
+                            1.0, self.max_grad_norm / max(global_v, 1e-12)
+                        )
+                        fires_buggy = (
+                            "BUGGY_FIRES" if local_clip < 1.0 else "no_local_clip"
+                        )
+                        fires_true = (
+                            "TRUE_FIRES" if global_clip < 1.0 else "no_global_clip"
+                        )
+                        mode = "FIX_ON" if _fix else "FIX_OFF"
+                        print(
+                            f"[CLIP_DIAG r{rank}/{world} {mode}] "
+                            f"local={local_v:.4f} global={global_v:.4f} "
+                            f"ratio={ratio:.4f} | "
+                            f"local_clip={local_clip:.4f} "
+                            f"global_clip={global_clip:.4f} "
+                            f"({fires_buggy}, {fires_true})",
+                            flush=True,
+                        )
+
+        if _fix and global_norm is not None:
+            # FSDP-aware clip: every rank scales its grad shard by the SAME
+            # factor derived from the true global norm.
+            with torch.no_grad():
+                clip_coef = (
+                    self.max_grad_norm / (global_norm + 1e-6)
+                ).clamp(max=1.0)
+                for p in self.fp32_params:
+                    if p.grad is not None:
+                        p.grad.mul_(clip_coef)
+        else:
+            torch.nn.utils.clip_grad_norm_(self.fp32_params, self.max_grad_norm)
+
         self.optimizer.step()
         self.optimizer.zero_grad()
         self.scheduler.step()
