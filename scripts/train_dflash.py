@@ -463,6 +463,9 @@ def main():
     # (whole model = one FSDP unit, all collectives serial on critical path) —
     # for A/B testing the overlap speedup.
     _no_overlap = os.environ.get("SPECFORGE_FSDP_NO_OVERLAP", "0") == "1"
+    # Ablation knob: keep per-layer wrap but turn OFF prefetch/limit_all_gathers,
+    # so the per-layer-wrap effect can be measured separately from prefetch.
+    _no_prefetch = os.environ.get("SPECFORGE_FSDP_NO_PREFETCH", "0") == "1"
     fsdp_kwargs = dict(
         use_orig_params=True,
         mixed_precision=MixedPrecision(
@@ -488,10 +491,18 @@ def main():
                     transformer_auto_wrap_policy,
                     transformer_layer_cls=block_classes,
                 ),
-                forward_prefetch=True,
-                backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-                limit_all_gathers=True,
             )
+            if _no_prefetch:
+                print_on_rank0(
+                    "FSDP per-layer wrap ON, prefetch DISABLED "
+                    "(ablation: isolating per-layer wrap effect)"
+                )
+            else:
+                fsdp_kwargs.update(
+                    forward_prefetch=True,
+                    backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+                    limit_all_gathers=True,
+                )
         else:
             print_on_rank0(
                 "No _no_split_modules on draft model; single-unit FSDP wrap "
