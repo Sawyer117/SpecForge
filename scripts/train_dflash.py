@@ -559,6 +559,12 @@ def main():
     last_time = time.time()
     print_on_rank0(f"Starting training from epoch {start_epoch}, step {global_step}")
 
+    # Peak-memory probe for PR #566 prefetch A/B. Set SPECFORGE_PEAK_MEM_INTERVAL=N
+    # to print rank-max alloc/reserved every N steps. 0 disables.
+    _peak_mem_interval = int(os.environ.get("SPECFORGE_PEAK_MEM_INTERVAL", "0"))
+    if _peak_mem_interval > 0:
+        torch.cuda.reset_peak_memory_stats()
+
     for epoch in range(start_epoch, args.num_epochs):
         train_dataloader.sampler.set_epoch(epoch)
         draft_model.train()
@@ -628,6 +634,19 @@ def main():
                 save_checkpoint(
                     args, epoch, global_step, dflash_model, draft_model, optimizer
                 )
+
+            if _peak_mem_interval > 0 and global_step % _peak_mem_interval == 0:
+                alloc_gb = torch.cuda.max_memory_allocated() / (1024**3)
+                reserv_gb = torch.cuda.max_memory_reserved() / (1024**3)
+                t = torch.tensor([alloc_gb, reserv_gb], device="cuda")
+                dist.all_reduce(t, op=dist.ReduceOp.MAX)
+                if dist.get_rank() == 0:
+                    print(
+                        f"[peak-mem step={global_step}] "
+                        f"alloc_max={t[0].item():.2f}GB "
+                        f"reserved_max={t[1].item():.2f}GB",
+                        flush=True,
+                    )
 
     save_checkpoint(
         args, args.num_epochs, global_step, dflash_model, draft_model, optimizer
